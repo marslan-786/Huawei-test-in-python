@@ -1,7 +1,6 @@
-# Base Image Python 3.11
 FROM python:3.11-bookworm
 
-# 1. System Dependencies (FFmpeg + Browsers Support)
+# Install System Deps
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libnss3 \
@@ -23,20 +22,21 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# 2. Python Libraries Install
+# Copy Requirements First
 COPY requirements.txt .
-RUN pip install --no-cache-dir -U -r requirements.txt
 
-# 3. Install Playwright Browsers (The AI Eyes)
+# FORCE NO CACHE INSTALL (Fixes version mismatch issues)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright
 RUN playwright install chromium
 RUN playwright install-deps
 
-# 4. Copy Code
+# Copy Code
 COPY . .
 
-# 5. Create Captures Folder & Permissions
+# Permissions
 RUN mkdir -p captures && chmod 777 captures
 
-# 6. RUN COMMAND (Railway Port Variable Fix)
-# Ye line Railway k $PORT ko automatic utha legi.
+# Start Command
 CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"
