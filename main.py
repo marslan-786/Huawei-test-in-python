@@ -13,16 +13,19 @@ from playwright.async_api import async_playwright
 CAPTURE_DIR = "./captures"
 VIDEO_PATH = f"{CAPTURE_DIR}/proof.mp4"
 
-# 🇺🇸 USA LINK (Updated)
+# 🇺🇸 USA LINK
 MAGIC_URL = "https://id5.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html?regionCode=us&countryCode=us&lang=en-us"
 
-# 👇👇👇 YOUR USA PROXY (Fixed) 👇👇👇
+# 👇👇👇 HARDCODED VALID LOOKING US NUMBER 👇👇👇
+# Area Code 310 (California) is widely accepted
+FIXED_US_PHONE = "3102661985" 
+
+# 👇👇👇 YOUR USA PROXY 👇👇👇
 PROXY_CONFIG = {
     "server": "http://142.111.48.253:7030", 
     "username": "wwwsyxzg", 
     "password": "582ygxexguhx"
 }
-# 👆👆👆
 
 app = FastAPI()
 if not os.path.exists(CAPTURE_DIR): os.makedirs(CAPTURE_DIR)
@@ -37,22 +40,13 @@ def log_msg(message):
     logs.insert(0, entry)
     if len(logs) > 100: logs.pop()
 
-# --- HELPER: GENERATE RANDOM USA NUMBER ---
-def get_usa_number():
-    # US Area codes (e.g., 202, 212, 310)
-    area_codes = ["202", "212", "310", "323", "415", "646"]
-    code = random.choice(area_codes)
-    # Remaining 7 digits
-    number = f"{random.randint(100, 999)}{random.randint(1000, 9999)}"
-    return f"{code}{number}"
-
 # --- DASHBOARD ---
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei USA Test</title>
+        <title>Huawei USA Valid Number Test</title>
         <style>
             body { background: #0d1117; color: #58a6ff; font-family: monospace; padding: 20px; text-align: center; }
             .control-panel { 
@@ -67,7 +61,6 @@ async def dashboard():
             .btn-start { background: #238636; }
             .btn-refresh { background: #1f6feb; }
             .btn-video { background: #8957e5; }
-            
             .logs { height: 200px; overflow-y: auto; text-align: left; border: 1px solid #30363d; padding: 10px; color: #8b949e; margin-bottom: 20px; background: #0d1117; }
             .gallery { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-bottom: 20px; }
             .gallery img { height: 120px; border: 1px solid #30363d; border-radius: 4px; }
@@ -76,13 +69,13 @@ async def dashboard():
         </style>
     </head>
     <body>
-        <h1>🇺🇸 HUAWEI USA PROXY TEST</h1>
+        <h1>🇺🇸 HUAWEI US NUMBER TEST</h1>
         <div class="control-panel">
-            <button onclick="startBot()" class="btn-start">🚀 START USA TEST</button>
+            <button onclick="startBot()" class="btn-start">🚀 START TEST (FIXED NUMBER)</button>
             <button onclick="refreshData()" class="btn-refresh">🔄 REFRESH</button>
             <button onclick="makeVideo()" class="btn-video">🎬 VIDEO PROOF</button>
         </div>
-        <div class="logs" id="logs">Ready for US Proxy Test...</div>
+        <div class="logs" id="logs">Ready...</div>
         <h3>📸 LIVE FEED</h3>
         <div class="gallery" id="gallery"></div>
         <div id="video-section">
@@ -90,7 +83,7 @@ async def dashboard():
             <video id="proof-player" controls><source src="" type="video/mp4"></video>
         </div>
         <script>
-            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> INITIALIZING USA TEST..."); }
+            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> STARTING..."); }
             function refreshData() {
                 fetch('/status').then(r=>r.json()).then(d=>{
                     document.getElementById('logs').innerHTML = d.logs.map(l=>`<div>${l}</div>`).join('');
@@ -123,7 +116,7 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    log_msg(">>> COMMAND: Start USA Proxy Test")
+    log_msg(">>> COMMAND: Start Fixed Number Test")
     bt.add_task(run_usa_agent)
     return {"status": "started"}
 
@@ -158,8 +151,8 @@ async def run_usa_agent():
     try:
         for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
         
-        target_phone_us = get_usa_number()
-        log_msg(f"🇺🇸 Generated Random US Phone: {target_phone_us}")
+        # Using Hardcoded Valid Number
+        log_msg(f"🇺🇸 Using Fixed Valid US Phone: {FIXED_US_PHONE}")
 
         async with async_playwright() as p:
             log_msg(f"🌍 Connecting to Proxy: {PROXY_CONFIG['server']}...")
@@ -196,7 +189,8 @@ async def run_usa_agent():
             
             if await inp.count() > 0:
                 await human_click(page, inp.first, "Input")
-                await page.keyboard.type(target_phone_us, delay=100)
+                # Typing fixed number
+                await page.keyboard.type(FIXED_US_PHONE, delay=100)
                 await page.mouse.click(500, 500) # Blur
                 await page.screenshot(path=f"{CAPTURE_DIR}/monitor_01_filled.jpg")
             else:
