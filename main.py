@@ -28,6 +28,9 @@ PROXY_CONFIG = {
 
 app = FastAPI()
 if not os.path.exists(CAPTURE_DIR): os.makedirs(CAPTURE_DIR)
+# Ensure sub-directories exist for AI
+if not os.path.exists(f"{CAPTURE_DIR}/debug_ai"): os.makedirs(f"{CAPTURE_DIR}/debug_ai")
+
 app.mount("/captures", StaticFiles(directory=CAPTURE_DIR), name="captures")
 
 logs = []
@@ -43,86 +46,179 @@ def generate_russia_number():
     rest = ''.join([str(random.randint(0, 9)) for _ in range(9)])
     return f"{prefix}{rest}"
 
-# --- DASHBOARD ---
+# --- DASHBOARD UI ---
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Unlimited</title>
+        <title>Huawei Bot Control</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            body { background: #000; color: #00e676; font-family: monospace; padding: 20px; text-align: center; }
-            button { padding: 12px 24px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #6200ea; color: white; border-radius: 4px; }
+            body { background: #0d0d0d; color: #00e676; font-family: 'Segoe UI', monospace; padding: 20px; text-align: center; margin: 0; }
+            h1 { margin-bottom: 10px; text-transform: uppercase; letter-spacing: 2px; }
             
-            .status-bar { 
-                background: #333; color: yellow; padding: 10px; margin: 10px auto; 
-                width: 80%; border-radius: 5px; font-weight: bold; display: none; 
+            /* BUTTONS */
+            .btn { 
+                padding: 12px 20px; font-weight: bold; cursor: pointer; border:none; margin: 5px; 
+                color: white; border-radius: 6px; font-size: 14px; transition: 0.2s; width: 250px;
+                display: inline-block;
             }
+            .btn:hover { opacity: 0.8; transform: scale(1.02); }
+            .btn-start { background: #6200ea; }
+            .btn-view { background: #2962ff; }
+            .btn-close { background: #d50000; }
+            .btn-ai { background: #ff6d00; }
+            .btn-video { background: #c51162; }
+            .btn-refresh { background: #00bfa5; width: auto; }
 
-            .logs { height: 250px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #111; margin-bottom: 20px; font-size: 12px; color: #ccc; }
+            /* LOGS TERMINAL */
+            .logs-container {
+                width: 90%; margin: 0 auto; text-align: left;
+                background: #111; border: 1px solid #333; border-radius: 8px;
+                padding: 10px; height: 250px; overflow-y: auto;
+                font-family: monospace; font-size: 12px; color: #ccc;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            }
+            .log-entry { padding: 2px 0; border-bottom: 1px solid #222; }
+
+            /* SECTIONS */
+            .section { margin-top: 20px; padding: 10px; border-top: 1px solid #333; }
+            .hidden { display: none; }
             
-            #video-section { 
-                display:none; 
-                margin: 20px auto; 
-                border: 3px solid #00e676; 
-                padding:15px; 
-                background: #111;
-                width: fit-content;
-                border-radius: 10px;
-            }
+            /* GALLERY */
+            .gallery { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-top: 10px; }
+            .gallery img { height: 80px; border: 1px solid #444; border-radius: 4px; cursor: pointer; }
+            .gallery img:hover { transform: scale(1.5); z-index: 100; border-color: white; }
 
-            /* GALLERY: Infinite Scroll */
-            .gallery { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-top: 20px; }
-            .gallery img { height: 60px; border: 1px solid #333; opacity: 0.9; }
-            .gallery img:hover { height: 150px; border-color: white; z-index:999; transition: 0.1s; }
+            /* AI GALLERY SPECIFIC */
+            .ai-gallery img { height: 120px; border: 2px solid #ff6d00; }
+
+            /* VIDEO SECTION */
+            #video-status { font-weight: bold; margin: 10px; font-size: 14px; min-height: 20px; }
+            video { border: 2px solid #c51162; border-radius: 8px; margin-top: 10px; width: 80%; max-width: 600px; }
+
         </style>
     </head>
     <body>
-        <h1>🇷🇺 RUSSIA: 0 -> 7 SWAP TEST</h1>
-        <p>Unlimited History | Robust Video Gen | Hold & Drag</p>
+        <h1>🤖 HUAWEI BOT PANEL</h1>
         
         <div>
-            <button onclick="startBot()">🚀 START TEST</button>
-            <button onclick="makeVideo()" style="background: #e91e63;">🎬 GENERATE VIDEO</button>
-            <button onclick="refreshData()" style="background: #2962ff;">🔄 REFRESH ALL</button>
+            <button class="btn btn-start" onclick="startBot()">🚀 START BOT</button>
+            <button class="btn btn-refresh" onclick="refreshData()">🔄 REFRESH DATA</button>
         </div>
 
-        <div id="status-bar" class="status-bar"></div>
-        
-        <div class="logs" id="logs">Waiting...</div>
-        
-        <div id="video-section">
-            <h3 style="margin-top:0; color: #00e676;">🎬 REPLAY</h3>
-            <video id="v-player" controls width="500" autoplay loop></video>
+        <h3 style="margin-bottom: 5px; text-align: left; width: 90%; margin: 10px auto;">📟 TERMINAL LOGS</h3>
+        <div class="logs-container" id="logs">Loading logs...</div>
+
+        <div class="section">
+            <button id="btn-pics" class="btn btn-view" onclick="togglePictures()">📸 VIEW CAPTURES</button>
+            
+            <div id="gallery-wrapper" class="hidden">
+                <div class="gallery" id="gallery"></div>
+            </div>
         </div>
 
-        <h3>🎞️ FULL HISTORY FEED</h3>
-        <div class="gallery" id="gallery"></div>
+        <div class="section">
+            <button id="btn-ai" class="btn btn-ai" onclick="toggleAI()">🧠 VIEW AI ANALYSIS</button>
+            
+            <div id="ai-wrapper" class="hidden">
+                <p style="color: #ff9e80; font-size: 12px;">(Preview of what AI sees & predicted result)</p>
+                <div class="gallery ai-gallery" id="ai-gallery"></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <button class="btn btn-video" onclick="makeVideo()">🎬 GENERATE VIDEO</button>
+            
+            <div id="video-status"></div>
+            
+            <div id="video-wrapper" class="hidden">
+                <video id="v-player" controls autoplay loop></video>
+            </div>
+        </div>
 
         <script>
-            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> STARTING..."); }
-            
+            // --- STATE VARIABLES ---
+            let showPics = false;
+            let showAI = false;
+
+            function startBot() { 
+                fetch('/start', {method: 'POST'}); 
+                logUpdate(">>> COMMAND SENT: START BOT"); 
+            }
+
             function refreshData() {
                 fetch('/status').then(r=>r.json()).then(d=>{
-                    document.getElementById('logs').innerHTML = d.logs.map(l=>`<div>${l}</div>`).join('');
-                    document.getElementById('gallery').innerHTML = d.images.map(i=>`<img src="${i}">`).join('');
+                    // Update Logs
+                    document.getElementById('logs').innerHTML = d.logs.map(l=>`<div class="log-entry">${l}</div>`).join('');
+                    
+                    // Update Main Gallery
+                    if (showPics) {
+                        document.getElementById('gallery').innerHTML = d.images.map(i=>`<a href="${i}" target="_blank"><img src="${i}"></a>`).join('');
+                    }
+
+                    // Update AI Gallery
+                    if (showAI) {
+                         if(d.ai_images.length === 0) {
+                             document.getElementById('ai-gallery').innerHTML = "<p>No AI images found yet.</p>";
+                         } else {
+                             document.getElementById('ai-gallery').innerHTML = d.ai_images.map(i=>`<a href="${i}" target="_blank"><img src="${i}"></a>`).join('');
+                         }
+                    }
                 });
             }
 
+            function togglePictures() {
+                showPics = !showPics;
+                const wrapper = document.getElementById('gallery-wrapper');
+                const btn = document.getElementById('btn-pics');
+
+                if (showPics) {
+                    wrapper.classList.remove('hidden');
+                    btn.classList.remove('btn-view');
+                    btn.classList.add('btn-close');
+                    btn.innerText = "❌ CLOSE GALLERY";
+                    refreshData(); // Fetch images immediately
+                } else {
+                    wrapper.classList.add('hidden');
+                    btn.classList.remove('btn-close');
+                    btn.classList.add('btn-view');
+                    btn.innerText = "📸 VIEW CAPTURES";
+                    document.getElementById('gallery').innerHTML = ""; // Clear to save memory
+                }
+            }
+
+            function toggleAI() {
+                showAI = !showAI;
+                const wrapper = document.getElementById('ai-wrapper');
+                const btn = document.getElementById('btn-ai');
+
+                if (showAI) {
+                    wrapper.classList.remove('hidden');
+                    btn.innerText = "❌ CLOSE AI VIEW";
+                    refreshData();
+                } else {
+                    wrapper.classList.add('hidden');
+                    btn.innerText = "🧠 VIEW AI ANALYSIS";
+                    document.getElementById('ai-gallery').innerHTML = "";
+                }
+            }
+
             function makeVideo() {
-                var status = document.getElementById('status-bar');
-                status.style.display = 'block';
-                status.innerText = "⏳ PROCESSING THOUSANDS OF FRAMES... PLEASE WAIT...";
+                var status = document.getElementById('video-status');
+                var wrapper = document.getElementById('video-wrapper');
+                
+                status.innerText = "⏳ PROCESSING VIDEO... PLEASE WAIT...";
                 status.style.color = "yellow";
+                wrapper.classList.add('hidden'); // Hide player during generation
 
                 fetch('/generate_video', {method: 'POST'}).then(r=>r.json()).then(d=>{
                     if(d.status === "done") {
-                        status.innerText = "✅ VIDEO READY! PLAYING BELOW...";
+                        status.innerText = "✅ VIDEO READY!";
                         status.style.color = "#00e676";
                         
-                        var vSection = document.getElementById('video-section');
-                        vSection.style.display = 'block';
-                        
+                        wrapper.classList.remove('hidden');
                         var player = document.getElementById('v-player');
                         player.src = "/captures/proof.mp4?t=" + Date.now();
                         player.load();
@@ -134,8 +230,13 @@ async def dashboard():
                 });
             }
 
-            function logUpdate(msg) { document.getElementById('logs').innerHTML = "<div>" + msg + "</div>" + document.getElementById('logs').innerHTML; }
-            setInterval(refreshData, 5000); // Refresh every 5s to save browser CPU
+            function logUpdate(msg) { 
+                var logs = document.getElementById('logs');
+                logs.innerHTML = "<div class='log-entry'>[" + new Date().toLocaleTimeString() + "] " + msg + "</div>" + logs.innerHTML;
+            }
+            
+            // Auto Refresh Logs Only (to keep UI responsive)
+            setInterval(refreshData, 3000);
         </script>
     </body>
     </html>
@@ -143,10 +244,43 @@ async def dashboard():
 
 @app.get("/status")
 async def get_status():
-    # SHOW ALL IMAGES (No Limit)
-    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'), key=os.path.getmtime, reverse=True)
-    urls = [f"/captures/{os.path.basename(f)}" for f in files]
-    return JSONResponse({"logs": logs, "images": urls})
+    # 1. Main Flow Images (Exclude AI debugging ones to keep main gallery clean)
+    all_files = glob.glob(f'{CAPTURE_DIR}/*.jpg')
+    flow_files = [f for f in all_files if "ai_" not in os.path.basename(f) and "debug" not in f]
+    flow_files = sorted(flow_files, key=os.path.getmtime, reverse=True)
+
+    # 2. AI Specific Images
+    # We look for 'ai_solved_preview.jpg', '*_puzzle.png' and contents of 'debug_ai' folder
+    ai_files = []
+    
+    # The main preview result
+    if os.path.exists(f"{CAPTURE_DIR}/ai_solved_preview.jpg"):
+        ai_files.append(f"{CAPTURE_DIR}/ai_solved_preview.jpg")
+    
+    # The raw puzzle screenshots
+    ai_files.extend(glob.glob(f"{CAPTURE_DIR}/*_puzzle.png"))
+    
+    # The sliced tiles from debug folder
+    ai_files.extend(glob.glob(f"{CAPTURE_DIR}/debug_ai/*.jpg"))
+    
+    # Sort AI files by time
+    ai_files = sorted(ai_files, key=os.path.getmtime, reverse=True)
+
+    # Prepare URLs
+    flow_urls = [f"/captures/{os.path.basename(f)}" for f in flow_files]
+    
+    ai_urls = []
+    for f in ai_files:
+        if "debug_ai" in f:
+            ai_urls.append(f"/captures/debug_ai/{os.path.basename(f)}")
+        else:
+            ai_urls.append(f"/captures/{os.path.basename(f)}")
+
+    return JSONResponse({
+        "logs": logs, 
+        "images": flow_urls,
+        "ai_images": ai_urls
+    })
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
@@ -155,24 +289,24 @@ async def start_bot(bt: BackgroundTasks):
 
 @app.post("/generate_video")
 async def trigger_video():
-    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg')) # Timestamp sort is automatic by name usually
+    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'))
+    # Filter out tiles to keep video clean
+    files = [f for f in files if "debug" not in f and "ai_" not in f]
+    
     if not files: return {"status": "error", "error": "No images found"}
     
     try:
-        # Optimized Writer
         with imageio.get_writer(VIDEO_PATH, fps=15, format='FFMPEG', quality=8) as writer:
             for filename in files:
                 try:
-                    # Read image safely
                     img = imageio.imread(filename)
                     writer.append_data(img)
-                except:
-                    continue # Skip broken images
+                except: continue
         return {"status": "done"}
     except Exception as e:
-        print(f"Video Error: {e}")
         return {"status": "error", "error": str(e)}
 
+# --- HELPER FUNCTIONS ---
 async def visual_tap(page, element, desc):
     try:
         await element.scroll_into_view_if_needed()
@@ -205,8 +339,6 @@ async def burst_wait(page, seconds, step_name):
 
 # --- MAIN FLOW ---
 async def run_russia_flow():
-    # NO DELETION! History preserved.
-    
     current_number = generate_russia_number()
     log_msg(f"🎬 Start Session | Number: {current_number}")
 
@@ -229,19 +361,17 @@ async def run_russia_flow():
             await page.goto(BASE_URL, timeout=90000)
             await burst_wait(page, 3, "01_loaded")
             
-            # Cookie
+            # (Cookie, Register, Terms logic same as before...)
             cookie_close = page.locator(".cookie-close-btn").first
             if await cookie_close.count() == 0: cookie_close = page.get_by_text("Accept", exact=True).first
             if await cookie_close.count() > 0: await visual_tap(page, cookie_close, "Cookie")
             
-            # Register
             reg_btn = page.get_by_text("Register", exact=True).first
             if await reg_btn.count() == 0: reg_btn = page.get_by_role("button", name="Register").first
             if await reg_btn.count() > 0:
                 await visual_tap(page, reg_btn, "Register")
                 await burst_wait(page, 3, "02_reg_click")
-            
-            # Terms
+
             agree_text = page.get_by_text("Huawei ID User Agreement").first
             if await agree_text.count() > 0: await visual_tap(page, agree_text, "Terms")
             
@@ -265,7 +395,7 @@ async def run_russia_flow():
             if await use_phone.count() > 0: await visual_tap(page, use_phone, "Use_Phone")
             await burst_wait(page, 2, "05_phone_screen")
 
-            # --- COUNTRY SWITCH ---
+            # Country Switch
             log_msg("🌍 Switching to RUSSIA...")
             hk_selector = page.get_by_text("Hong Kong").first
             if await hk_selector.count() == 0: hk_selector = page.get_by_text("Country/Region").first
@@ -274,23 +404,17 @@ async def run_russia_flow():
                 await visual_tap(page, hk_selector, "Country_Selector")
                 await burst_wait(page, 2, "06_list_opened")
                 
-                # Check search
                 if await page.locator("input").count() > 0:
                     search_box = page.locator("input").first
                     await visual_tap(page, search_box, "Search_Box")
-                    
-                    log_msg("⌨️ Typing Russia...")
                     await page.keyboard.type("Russia", delay=100)
                     await burst_wait(page, 2, "07_typed")
-
                     target = page.get_by_text("Russia", exact=False).first
                     if await target.count() > 0:
                         await visual_tap(page, target, "Select_Russia")
                         await burst_wait(page, 3, "08_russia_set")
-                    else:
-                        log_msg("❌ Russia not found")
             
-            # INPUT & CODE
+            # Input & Code
             inp = page.locator("input[type='tel']").first
             if await inp.count() == 0: inp = page.locator("input").first
             
@@ -311,9 +435,8 @@ async def run_russia_flow():
                     log_msg("⏳ Waiting 10s for CAPTCHA...")
                     await burst_wait(page, 10, "10_final")
 
-                    # CHECK FOR CAPTCHA AND SOLVE
                     if len(page.frames) > 1:
-                        log_msg("🧩 CAPTCHA FOUND! Initiating 0->7 Swap...")
+                        log_msg("🧩 CAPTCHA FOUND! Calling AI Solver...")
                         await solve_captcha(page, "SESSION_X")
                         await burst_wait(page, 5, "11_post_swap")
                     else:
