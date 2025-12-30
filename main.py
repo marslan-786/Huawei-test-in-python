@@ -270,7 +270,8 @@ async def dashboard():
 
 @app.get("/status")
 async def get_status():
-    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'), key=os.path.getmtime, reverse=True)
+    # Get latest 50 images only
+    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'), key=os.path.getmtime, reverse=True)[:50]
     urls = [f"/captures/{os.path.basename(f)}" for f in files]
     return JSONResponse({"logs": logs, "images": urls})
 
@@ -347,6 +348,19 @@ async def visual_tap(page, element, desc):
         pass
     return False
 
+def cleanup_old_images():
+    """Keep only latest 50 images, delete older ones"""
+    try:
+        files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'), key=os.path.getmtime, reverse=True)
+        if len(files) > 50:
+            for old_file in files[50:]:
+                try:
+                    os.remove(old_file)
+                except:
+                    pass
+    except:
+        pass
+
 async def burst_wait(page, seconds, step_name):
     log_msg(f"📸 Recording {step_name} ({seconds}s)...")
     frames = int(seconds / 0.1)
@@ -355,6 +369,9 @@ async def burst_wait(page, seconds, step_name):
         filename = f"{ts}_{step_name}.jpg"
         await page.screenshot(path=f"{CAPTURE_DIR}/{filename}")
         await asyncio.sleep(0.1)
+    
+    # Cleanup after each burst
+    cleanup_old_images()
 
 # --- MAIN COLLECTION LOOP ---
 async def run_collection_loop():
