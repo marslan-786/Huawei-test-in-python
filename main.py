@@ -13,6 +13,10 @@ from playwright.async_api import async_playwright
 # --- CONFIGURATION ---
 CAPTURE_DIR = "./captures"
 VIDEO_PATH = f"{CAPTURE_DIR}/proof.mp4"
+NUMBERS_FILE = "numbers.txt"
+
+# 🌍 TARGET COUNTRY
+TARGET_COUNTRY = "Pakistan"
 
 # 🏁 STARTING URL
 BASE_URL = "https://id5.cloud.huawei.com"
@@ -37,11 +41,17 @@ def log_msg(message):
     logs.insert(0, entry)
     if len(logs) > 200: logs.pop()
 
-# --- HK NUMBER GENERATOR ---
-def generate_hk_number():
-    prefix = random.choice(['5', '6', '9'])
-    rest = ''.join([str(random.randint(0, 9)) for _ in range(7)])
-    return f"{prefix}{rest}"
+# --- FILE HELPER ---
+def get_next_number():
+    if not os.path.exists(NUMBERS_FILE): return None
+    with open(NUMBERS_FILE, "r") as f: lines = f.readlines()
+    numbers = [line.strip() for line in lines if line.strip()]
+    if not numbers: return None
+    current_number = numbers[0]
+    # Rotate
+    new_lines = numbers[1:] + [current_number]
+    with open(NUMBERS_FILE, "w") as f: f.write("\n".join(new_lines))
+    return current_number
 
 # --- DASHBOARD ---
 @app.get("/", response_class=HTMLResponse)
@@ -49,27 +59,27 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Scroll Master</title>
+        <title>Huawei Country Selector</title>
         <style>
-            body { background: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; text-align: center; }
-            button { padding: 10px 20px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #3f51b5; color: white; border-radius: 4px; }
-            .logs { height: 300px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #1e1e1e; margin-bottom: 20px; font-size: 13px; }
+            body { background: #121212; color: #00e676; font-family: monospace; padding: 20px; text-align: center; }
+            button { padding: 10px 20px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #6200ea; color: white; border-radius: 4px; }
+            .logs { height: 300px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #1e1e1e; margin-bottom: 20px; font-size: 13px; color: #e0e0e0; }
             .gallery { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
-            .gallery img { height: 120px; border: 1px solid #555; border-radius: 5px; transition: transform 0.2s; }
+            .gallery img { height: 120px; border: 1px solid #555; border-radius: 5px; }
             .gallery img:hover { transform: scale(1.5); border-color: #fff; z-index:10; position:relative; }
             #video-section { display:none; margin-top:20px; border:1px solid #444; padding:10px; }
         </style>
     </head>
     <body>
-        <h1>📜 HUAWEI SCROLL & FIND BOT</h1>
-        <p>Features: Smart Scrolling | Cookie Buster | Taller Screen</p>
+        <h1>🇵🇰 HUAWEI COUNTRY SELECTOR BOT</h1>
+        <p>Target: Pakistan | Method: Search & Select</p>
         <button onclick="startBot()">🚀 START BOT</button>
         <button onclick="refreshData()" style="background: #009688;">🔄 REFRESH</button>
         <button onclick="makeVideo()" style="background: #e91e63;">🎬 MAKE VIDEO</button>
         
         <div class="logs" id="logs">Waiting...</div>
         <div id="video-section"><video id="v-player" controls height="400"></video></div>
-        <h3>📸 CAPTURE HISTORY</h3>
+        <h3>📸 LIVE FEED</h3>
         <div class="gallery" id="gallery"></div>
 
         <script>
@@ -103,7 +113,7 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    bt.add_task(run_scroll_agent)
+    bt.add_task(run_country_select_agent)
     return {"status": "started"}
 
 @app.post("/generate_video")
@@ -116,7 +126,7 @@ async def trigger_video():
         return {"status": "done"}
     except: return {"status": "error"}
 
-# --- VISUAL TAP HELPER ---
+# --- VISUAL TAP HELPER (WITH FORCE DOT) ---
 async def visual_tap(page, element, desc):
     try:
         box = await element.bounding_box()
@@ -124,33 +134,34 @@ async def visual_tap(page, element, desc):
             x = box['x'] + box['width'] / 2
             y = box['y'] + box['height'] / 2
             
+            # Create Red Dot
             await page.evaluate(f"""
                 var dot = document.createElement('div');
-                dot.style.position = 'absolute'; left = '{x}px'; top = '{y}px';
-                dot.style.width = '25px'; height = '25px'; background = 'rgba(255, 0, 0, 0.8)';
-                dot.style.borderRadius = '50%'; border = '3px solid yellow'; zIndex = '999999';
+                dot.style.position = 'absolute'; 
+                dot.style.left = '{x}px'; 
+                dot.style.top = '{y}px';
+                dot.style.width = '30px'; 
+                dot.style.height = '30px'; 
+                dot.style.background = 'rgba(255, 0, 0, 0.9)'; /* RED */
+                dot.style.borderRadius = '50%'; 
+                dot.style.border = '3px solid white'; 
+                dot.style.zIndex = '999999';
+                dot.style.pointerEvents = 'none';
+                dot.id = 'temp-dot';
                 document.body.appendChild(dot);
             """)
             
-            log_msg(f"📍 Found: {desc}")
-            await asyncio.sleep(0.5)
-            log_msg(f"👆 Tapping {desc}...")
+            log_msg(f"📍 Target: {desc}")
+            await asyncio.sleep(0.5) # Show dot
+            
+            log_msg(f"🔴 FORCE TAPPING {desc}...")
             await page.touchscreen.tap(x, y)
+            
+            # Remove dot after tap (optional, keeping it shows history better in screenshots)
             return True
     except Exception as e:
         log_msg(f"⚠️ Tap Error: {e}")
     return False
-
-# --- SCROLL HELPER ---
-async def scroll_page(page, times=1):
-    log_msg(f"📜 Scrolling down ({times}x)...")
-    for _ in range(times):
-        # Touch swipe gesture (Pull up to scroll down)
-        await page.mouse.move(200, 600)
-        await page.mouse.down()
-        await page.mouse.move(200, 200, steps=15)
-        await page.mouse.up()
-        await asyncio.sleep(1)
 
 # --- WAIT HELPER ---
 async def wait_and_log(seconds):
@@ -158,16 +169,20 @@ async def wait_and_log(seconds):
     await asyncio.sleep(seconds)
 
 # --- MAIN AGENT ---
-async def run_scroll_agent():
+async def run_country_select_agent():
     session_id = int(time.time())
-    current_number = generate_hk_number()
-    log_msg(f"🎬 Session {session_id} | Number: {current_number}")
+    
+    # Use Next Number from File (Assuming Pakistani numbers now)
+    current_number = get_next_number()
+    if not current_number:
+        log_msg("❌ No numbers in numbers.txt!")
+        return
+
+    log_msg(f"🎬 Session {session_id} | Changing Region to: {TARGET_COUNTRY}")
 
     async with async_playwright() as p:
         pixel_5 = p.devices['Pixel 5'].copy()
         pixel_5['user_agent'] = "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.101 Mobile Safari/537.36"
-        
-        # Taller viewport to see more
         pixel_5['viewport'] = {'width': 412, 'height': 950} 
 
         browser = await p.chromium.launch(
@@ -180,78 +195,84 @@ async def run_scroll_agent():
         page = await context.new_page()
 
         try:
-            # STEP 1: LOAD
+            # STEP 1: LOAD MAIN PAGE
             log_msg("🚀 Navigating...")
             await page.goto(BASE_URL, timeout=90000)
-            await wait_and_log(5)
+            await wait_and_log(4)
             
-            # KILL COOKIE BANNER
-            cookie_close = page.locator(".cookie-close-btn").first # Generic class attempt
+            # Close Cookie
+            cookie_close = page.locator(".cookie-close-btn").first
             if await cookie_close.count() == 0: cookie_close = page.get_by_text("Accept", exact=True).first
-            
             if await cookie_close.count() > 0:
-                log_msg("🍪 Closing Cookie Banner...")
                 await visual_tap(page, cookie_close, "Cookie Accept")
                 await wait_and_log(2)
 
             await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_01_loaded.jpg")
 
-            # STEP 2: REGISTER BUTTON (With Scroll)
+            # STEP 2: REGISTER BUTTON
             reg_btn = page.get_by_text("Register", exact=True).first
             if await reg_btn.count() == 0: reg_btn = page.get_by_role("button", name="Register").first
             
-            # Loop to find (Scroll if needed)
-            found_reg = False
-            for i in range(3):
-                if await reg_btn.count() > 0 and await reg_btn.is_visible():
-                    await visual_tap(page, reg_btn, "Register Button")
-                    found_reg = True
-                    break
-                else:
-                    log_msg("🔍 Register button hidden, scrolling...")
-                    await scroll_page(page, 1)
+            if await reg_btn.count() > 0:
+                await visual_tap(page, reg_btn, "Register Button")
+                await wait_and_log(5)
+            else:
+                log_msg("⚠️ Register button hidden")
             
-            if not found_reg:
-                log_msg("⚠️ Register button not found! (Maybe already on login/reg page?)")
-            
-            await wait_and_log(4)
-            await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_02_post_register.jpg")
+            await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_02_register_page.jpg")
 
-            # STEP 3: AGREE TO TERMS (Smart Scroll)
-            # First, check for checkbox text
+            # --- 🔥 NEW: CHANGE COUNTRY TO PAKISTAN ---
+            log_msg("🌍 Checking for Hong Kong/Country Selector...")
+            
+            # Find the element that shows current country (Usually "Hong Kong (China)")
+            # Or the label "Country/Region" which is clickable
+            hk_selector = page.get_by_text("Hong Kong").first
+            if await hk_selector.count() == 0: hk_selector = page.get_by_text("Country/Region").first
+            
+            if await hk_selector.count() > 0:
+                await visual_tap(page, hk_selector, "Country Selector (HK)")
+                await wait_and_log(3)
+                await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_03_country_list.jpg")
+
+                # SEARCH
+                search_box = page.locator("input").first # Generic input is usually search here
+                if await search_box.count() > 0:
+                    await visual_tap(page, search_box, "Search Bar")
+                    log_msg(f"⌨️ Typing '{TARGET_COUNTRY}'...")
+                    await page.keyboard.type(TARGET_COUNTRY, delay=100)
+                    await wait_and_log(2)
+                    await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_04_search_typed.jpg")
+
+                    # SELECT FROM LIST
+                    target_country_opt = page.get_by_text(TARGET_COUNTRY, exact=True).first
+                    if await target_country_opt.count() > 0:
+                        await visual_tap(page, target_country_opt, f"Select {TARGET_COUNTRY}")
+                        await wait_and_log(3)
+                        log_msg(f"✅ Country Changed to {TARGET_COUNTRY}")
+                    else:
+                        log_msg("❌ Country not found in list")
+                else:
+                    log_msg("❌ Search bar not found")
+            else:
+                log_msg("⚠️ Could not find Country Selector")
+
+            await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_05_country_final.jpg")
+
+            # STEP 3: AGREE
             agree_text = page.get_by_text("Huawei ID User Agreement").first
             if await agree_text.count() > 0:
                 await visual_tap(page, agree_text, "Terms Checkbox")
                 await wait_and_log(1)
 
-            # Now find AGREE/NEXT button
-            # Usually needs scrolling to bottom
             agree_btn = page.get_by_text("Agree", exact=True).first
             if await agree_btn.count() == 0: agree_btn = page.get_by_text("Next", exact=True).first
             
-            found_agree = False
-            for i in range(3): # Try scrolling 3 times
-                if await agree_btn.count() > 0 and await agree_btn.is_visible():
-                    await visual_tap(page, agree_btn, "Agree/Next")
-                    found_agree = True
-                    break
-                else:
-                    log_msg(f"📜 Scrolling to find Agree button ({i+1}/3)...")
-                    await scroll_page(page, 1)
-                    await wait_and_log(1)
-
-            if not found_agree:
-                log_msg("❌ Agree button STILL missing after scroll.")
-                await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_03_agree_missing.jpg")
-            else:
+            if await agree_btn.count() > 0:
+                await visual_tap(page, agree_btn, "Agree/Next")
                 await wait_and_log(4)
-                await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_03_agreed.jpg")
 
-            # STEP 4: DOB (Scroll Wheel Logic)
+            # STEP 4: DOB
             log_msg("📅 Handling DOB...")
-            await scroll_page(page, 1) # Scroll down a bit to see picker if hidden
-            
-            # Gesture to change year
             await page.mouse.move(200, 500)
             await page.mouse.down()
             await page.mouse.move(200, 800, steps=20)
@@ -269,6 +290,8 @@ async def run_scroll_agent():
                 await visual_tap(page, use_phone, "Use Phone Option")
                 await wait_and_log(2)
 
+            await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_06_input_screen.jpg")
+
             # STEP 6: INPUT & CODE
             inp = page.locator("input[type='tel']").first
             if await inp.count() == 0: inp = page.locator("input").first
@@ -279,7 +302,6 @@ async def run_scroll_agent():
                     await page.keyboard.type(char)
                     await asyncio.sleep(0.3)
                 await page.touchscreen.tap(20, 100) # Blur
-                
                 await wait_and_log(1)
                 
                 get_code = page.locator(".get-code-btn").first
@@ -287,14 +309,20 @@ async def run_scroll_agent():
                 
                 if await get_code.count() > 0:
                     await visual_tap(page, get_code, "GET CODE")
-                    log_msg("⏳ Waiting 10s for result...")
-                    await asyncio.sleep(10)
-                    await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_06_result.jpg")
-                    log_msg("✅ Check screenshot for Captcha!")
+                    log_msg("⏳ Waiting 15s for CAPTCHA...")
+                    await asyncio.sleep(15)
+                    
+                    await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_07_result.jpg")
+                    
+                    if len(page.frames) > 1 or await page.locator("iframe").count() > 0:
+                         log_msg("🎉 BINGO! CAPTCHA DETECTED! (Mission Success)")
+                         await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_SUCCESS.jpg")
+                    else:
+                         log_msg("ℹ️ Check screenshot for result")
                 else:
-                    log_msg("❌ Get Code button missing")
+                    log_msg("❌ Get Code Missing")
             else:
-                log_msg("❌ Input field missing")
+                log_msg("❌ Input Missing")
 
             await browser.close()
 
