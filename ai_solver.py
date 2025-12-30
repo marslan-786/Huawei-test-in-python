@@ -6,17 +6,24 @@ import shutil
 def get_swap_indices(image_path, rows=2, cols=4, logger=print):
     logger(f"🧠 AI: Analyzing {image_path}")
     
-    if not os.path.exists(image_path):
-        return 0, 7
+    if not os.path.exists(image_path): return 0, 7
 
     img = cv2.imread(image_path)
     if img is None: return 0, 7
 
     h, w, _ = img.shape
+    
+    # --- 🔥 STEP 1: REMOVE OUTER CONTAINER BORDER ---
+    # Screenshot often has a white border around the whole puzzle.
+    # Let's crop 5 pixels from all sides of the MAIN image first.
+    border_cut = 5
+    img = img[border_cut:h-border_cut, border_cut:w-border_cut]
+    
+    # Recalculate dimensions
+    h, w, _ = img.shape
     tile_h = h // rows
     tile_w = w // cols
     
-    # (Tiles slicing logic same as before...)
     debug_dir = "./captures/debug_ai"
     if os.path.exists(debug_dir): shutil.rmtree(debug_dir)
     os.makedirs(debug_dir)
@@ -30,14 +37,24 @@ def get_swap_indices(image_path, rows=2, cols=4, logger=print):
             tiles.append(tile)
             cv2.imwrite(f"{debug_dir}/tile_{len(tiles)-1}.jpg", tile)
 
-    # (LAB Color and Logic same as V2...)
+    # Convert to LAB for Human Vision
     tiles_lab = [cv2.cvtColor(t, cv2.COLOR_BGR2LAB) for t in tiles]
 
     def calculate_connection_error(tile_a, tile_b, direction):
+        # --- 🔥 STEP 2: INNER SAFE ZONE ---
+        # Don't look at the exact pixel edge (it might be blurry or have a line).
+        # Look 3 pixels INSIDE the tile.
+        safe_margin = 3
+        
         if direction == 'horizontal':
-            edge_a = tile_a[:, -1, :]; edge_b = tile_b[:, 0, :]
+            # A's Right (Inside) vs B's Left (Inside)
+            edge_a = tile_a[safe_margin:-safe_margin, -safe_margin, :] 
+            edge_b = tile_b[safe_margin:-safe_margin, safe_margin, :]  
         else:
-            edge_a = tile_a[-1, :, :]; edge_b = tile_b[0, :, :]
+            # A's Bottom (Inside) vs B's Top (Inside)
+            edge_a = tile_a[-safe_margin, safe_margin:-safe_margin, :] 
+            edge_b = tile_b[safe_margin, safe_margin:-safe_margin, :]  
+            
         return np.mean(np.abs(edge_a.astype("int") - edge_b.astype("int")))
 
     def get_grid_chaos(order):
@@ -65,8 +82,9 @@ def get_swap_indices(image_path, rows=2, cols=4, logger=print):
             temp_order = original_order[:]
             temp_order[i], temp_order[j] = temp_order[j], temp_order[i]
             chaos = get_grid_chaos(temp_order)
+            
+            # Improvement threshold
             if chaos < min_chaos:
-                # logger(f"💡 Better Match: {i} <-> {j} (Score: {chaos:.2f})") # Too noisy for UI
                 min_chaos = chaos
                 best_swap = (i, j)
 
@@ -87,5 +105,10 @@ def get_swap_indices(image_path, rows=2, cols=4, logger=print):
     solved_img = np.vstack(final_rows)
     cv2.imwrite("./captures/ai_solved_preview.jpg", solved_img)
     
+    # --- 🔥 FAIL SAFE: If still 0->0, Try random corner move ---
+    if source == target:
+        logger("⚠️ AI Uncertain (0->0). Forcing logical corner swap.")
+        return 0, 4 # Try swapping corners if stuck
+        
     logger(f"📢 AI DECISION: Swap {source} <-> {target}")
     return source, target
