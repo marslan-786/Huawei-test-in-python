@@ -1,83 +1,54 @@
 import asyncio
 import random
 import time
-# import cv2  <-- Future use for exact calculation
-# import numpy as np
 
-async def solve_captcha(page):
-    print("🧩 CAPTCHA DETECTED! Initializing Solver...")
+async def solve_captcha(page, session_id):
+    print("🧠 SOLVER: Analyzing Captcha Structure...")
     
     # 1. FIND IFRAME
-    # Huawei captcha usually loads inside an iframe
     frames = page.frames
     captcha_frame = None
     
-    # Dhoondo k kis frame me captcha hai
+    # Koshish karo k sahi frame mile
     for frame in frames:
         try:
-            # Check for slider element
-            if await frame.locator(".uc-btn-handler").count() > 0:
+            # Aksar frames ka url 'captcha' contain karta hai
+            if "captcha" in frame.url or await frame.locator("img").count() > 0:
                 captcha_frame = frame
-                print("✅ Slider found in frame!")
+                # Thora wait taake render ho jaye
+                await asyncio.sleep(1)
                 break
         except: continue
-        
-    if not captcha_frame:
-        print("❌ Could not find Captcha Frame")
-        return False
+    
+    # Agar specific frame nahi mila to last frame try karo (usually top layer)
+    if not captcha_frame and len(frames) > 1:
+        captcha_frame = frames[-1]
 
-    # 2. LOCATE ELEMENTS
-    try:
-        slider_btn = captcha_frame.locator(".uc-btn-handler").first
-        background_img = captcha_frame.locator("#img_Verify").first # Background image ID usually
+    if captcha_frame:
+        print(f"✅ Frame Found: {captcha_frame.url}")
         
-        # Screenshot for debugging (Taake hum bad me OpenCV adjust kar sakein)
-        timestamp = int(time.time())
-        await captcha_frame.screenshot(path=f"./captures/captcha_debug_{timestamp}.jpg")
-        print(f"📸 Captcha Screenshot Saved: captcha_debug_{timestamp}.jpg")
+        # 2. CAPTURE THE CAPTCHA IMAGE ONLY
+        # Hum poore page ki bajaye sirf captcha frame ki photo lenge
+        # Taake AI ko saaf nazar aye
+        try:
+            await captcha_frame.screenshot(path=f"./captures/{session_id}_captcha_FRAME_CLOSEUP.jpg")
+            print("📸 Captcha Close-up Saved!")
+        except:
+            print("⚠️ Could not take frame screenshot")
 
-        # 3. GET COORDINATES
-        box = await slider_btn.bounding_box()
-        if not box: return False
+        # 3. IDENTIFY ELEMENTS (Just reporting for now)
+        slider = await captcha_frame.locator(".uc-btn-handler").count()
+        puzzle = await captcha_frame.locator(".puzzle-container").count()
         
-        start_x = box['x'] + (box['width'] / 2)
-        start_y = box['y'] + (box['height'] / 2)
-        
-        # --- HUMAN DRAG LOGIC ---
-        # Abhi hum "Blind Drag" kar rahay hain test k liye.
-        # Baad me hum yahan OpenCV se exact 'end_x' nikalenge.
-        
-        # Huawei sliders usually need to move between 100px to 250px
-        # Let's try a safe drag to middle for testing interaction
-        distance = random.randint(150, 220) 
-        end_x = start_x + distance
-        
-        print(f"🖱️ Dragging Slider from {start_x} to {end_x}...")
-        
-        # Mouse Down
-        await page.mouse.move(start_x, start_y)
-        await page.mouse.down()
-        await asyncio.sleep(0.3)
-        
-        # Drag Movement (Thora upar neechay shake karte hue - Human behavior)
-        current_x = start_x
-        while current_x < end_x:
-            step = random.randint(5, 15)
-            current_x += step
+        if slider > 0:
+            print("🕵️ Type Detected: SLIDER")
+            # Yahan hum future me slider logic lagayenge
+        elif puzzle > 0:
+            print("🕵️ Type Detected: PUZZLE / CLICK")
+        else:
+            print("🕵️ Type: UNKNOWN (Check screenshots)")
             
-            # Thora sa Y-axis movement (Shake)
-            y_shake = start_y + random.randint(-2, 2)
-            
-            await page.mouse.move(current_x, y_shake)
-            await asyncio.sleep(random.uniform(0.01, 0.05)) # Fast movements
-            
-        # Mouse Up (Release)
-        await page.mouse.up()
-        print("✅ Drag Complete. Waiting for verification...")
-        
-        await asyncio.sleep(3)
-        return True
-
-    except Exception as e:
-        print(f"❌ Solver Error: {e}")
-        return False
+    else:
+        print("❌ Captcha Frame not clearly identified")
+    
+    return True

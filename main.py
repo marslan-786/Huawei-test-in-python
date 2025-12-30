@@ -30,6 +30,7 @@ app = FastAPI()
 if not os.path.exists(CAPTURE_DIR): os.makedirs(CAPTURE_DIR)
 app.mount("/captures", StaticFiles(directory=CAPTURE_DIR), name="captures")
 
+# --- LOGGING ---
 logs = []
 def log_msg(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -48,7 +49,6 @@ def get_next_number():
     with open(NUMBERS_FILE, "w") as f: f.write("\n".join(new_lines))
     return current_number
 
-# --- HK NUMBER GENERATOR (Agar file khali ho to) ---
 def generate_hk_number():
     prefix = random.choice(['5', '6', '9'])
     rest = ''.join([str(random.randint(0, 9)) for _ in range(7)])
@@ -60,7 +60,7 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Captcha Solver</title>
+        <title>Huawei Burst Capture</title>
         <style>
             body { background: #1a1a1a; color: #00e676; font-family: monospace; padding: 20px; text-align: center; }
             button { padding: 10px 20px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #6200ea; color: white; border-radius: 4px; }
@@ -70,9 +70,9 @@ async def dashboard():
         </style>
     </head>
     <body>
-        <h1>🧩 HUAWEI CAPTCHA SYSTEM</h1>
-        <p>Target: Hong Kong (Default) | Solver: Active</p>
-        <button onclick="startBot()">🚀 START SOLVER</button>
+        <h1>📸 HUAWEI BURST MODE BOT</h1>
+        <p>Capturing every second | Waiting for Captcha Load</p>
+        <button onclick="startBot()">🚀 START BURST TEST</button>
         <button onclick="refreshData()" style="background: #009688;">🔄 REFRESH</button>
         <div class="logs" id="logs">Waiting...</div>
         <h3>📸 LIVE FEED</h3>
@@ -86,7 +86,7 @@ async def dashboard():
                 });
             }
             function logUpdate(msg) { document.getElementById('logs').innerHTML = "<div>" + msg + "</div>" + document.getElementById('logs').innerHTML; }
-            setInterval(refreshData, 3000);
+            setInterval(refreshData, 2000); // Faster refresh
         </script>
     </body>
     </html>
@@ -121,16 +121,27 @@ async def visual_tap(page, element, desc):
     except: pass
     return False
 
-async def wait_and_log(seconds):
-    log_msg(f"⏳ Waiting {seconds}s...")
-    await asyncio.sleep(seconds)
+# --- 🔥 NEW: WAIT & CAPTURE EVERY SECOND ---
+async def wait_and_capture(page, seconds, session_id, step_name):
+    log_msg(f"⏳ Waiting {seconds}s ({step_name})...")
+    for i in range(seconds):
+        await asyncio.sleep(1)
+        # 01, 02 format for sorting
+        filename = f"{session_id}_{step_name}_{i:02d}.jpg"
+        await page.screenshot(path=f"{CAPTURE_DIR}/{filename}")
+        log_msg(f"📸 Captured: {filename}")
+    log_msg("✅ Wait Complete.")
 
 # --- MAIN FLOW ---
 async def run_hk_flow():
+    # Clear old captures to keep gallery clean
+    for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
+
     session_id = int(time.time())
-    current_number = generate_hk_number() # Using Random HK number for Captcha Test
+    current_number = get_next_number() # Uses numbers.txt
+    if not current_number: current_number = generate_hk_number() # Fallback
     
-    log_msg(f"🎬 Session {session_id} | HK Number: {current_number}")
+    log_msg(f"🎬 Session {session_id} | Number: {current_number}")
 
     async with async_playwright() as p:
         pixel_5 = p.devices['Pixel 5'].copy()
@@ -149,35 +160,30 @@ async def run_hk_flow():
         try:
             log_msg("🚀 Navigating...")
             await page.goto(BASE_URL, timeout=90000)
-            await wait_and_log(4)
+            await wait_and_capture(page, 4, session_id, "01_loading")
             
             # Cookie
             cookie_close = page.locator(".cookie-close-btn").first
             if await cookie_close.count() == 0: cookie_close = page.get_by_text("Accept", exact=True).first
             if await cookie_close.count() > 0: await visual_tap(page, cookie_close, "Cookie")
             
-            await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_01_loaded.jpg")
-
             # Register
             reg_btn = page.get_by_text("Register", exact=True).first
             if await reg_btn.count() == 0: reg_btn = page.get_by_role("button", name="Register").first
             if await reg_btn.count() > 0:
                 await visual_tap(page, reg_btn, "Register")
-                await wait_and_log(5)
+                await wait_and_capture(page, 5, session_id, "02_registering")
             
-            # --- SKIP COUNTRY CHANGE (Keep HK) ---
-            log_msg("ℹ️ Keeping Default Country (Hong Kong) for Captcha Test")
-
             # Agree Terms
             agree_text = page.get_by_text("Huawei ID User Agreement").first
             if await agree_text.count() > 0: await visual_tap(page, agree_text, "Terms")
-            await wait_and_log(1)
+            await asyncio.sleep(1)
 
             agree_btn = page.get_by_text("Agree", exact=True).first
             if await agree_btn.count() == 0: agree_btn = page.get_by_text("Next", exact=True).first
             if await agree_btn.count() > 0:
                 await visual_tap(page, agree_btn, "Agree/Next")
-                await wait_and_log(4)
+                await wait_and_capture(page, 4, session_id, "03_terms_done")
 
             # DOB
             log_msg("📅 DOB Scroll...")
@@ -185,16 +191,16 @@ async def run_hk_flow():
             await page.mouse.down()
             await page.mouse.move(200, 800, steps=20)
             await page.mouse.up()
-            await wait_and_log(2)
+            await asyncio.sleep(2)
             
             dob_next = page.get_by_text("Next", exact=True).first
             if await dob_next.count() > 0: await visual_tap(page, dob_next, "DOB Next")
-            await wait_and_log(3)
+            await wait_and_capture(page, 3, session_id, "04_dob_done")
 
             # Phone Option
             use_phone = page.get_by_text("Use phone number", exact=False).first
             if await use_phone.count() > 0: await visual_tap(page, use_phone, "Use Phone")
-            await wait_and_log(2)
+            await asyncio.sleep(2)
 
             # Input & Code
             inp = page.locator("input[type='tel']").first
@@ -206,39 +212,31 @@ async def run_hk_flow():
                     await page.keyboard.type(char)
                     await asyncio.sleep(0.2)
                 await page.touchscreen.tap(20, 100) # Blur
-                await wait_and_log(1)
+                await asyncio.sleep(1)
                 
                 get_code = page.locator(".get-code-btn").first
                 if await get_code.count() == 0: get_code = page.get_by_text("Get code", exact=False).first
                 
                 if await get_code.count() > 0:
                     await visual_tap(page, get_code, "GET CODE")
-                    log_msg("⏳ Waiting for Captcha/Result...")
                     
-                    # --- CAPTCHA DETECTION & SOLVING ---
-                    captcha_detected = False
-                    for _ in range(10): # Check for 10 seconds
-                        await asyncio.sleep(1)
-                        if len(page.frames) > 1:
-                            captcha_detected = True
-                            break
+                    # --- 🔥 CRITICAL CHANGE: WAIT 10s & CAPTURE EVERYTHING ---
+                    log_msg("⏳ Waiting 10s for Captcha to LOAD fully...")
+                    # Ye function har second picture le ga taake loading nazar aye
+                    await wait_and_capture(page, 10, session_id, "05_captcha_loading")
                     
-                    if captcha_detected:
-                        log_msg("🧩 CAPTCHA POPUP DETECTED! Calling Solver...")
-                        await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_captcha_detected.jpg")
+                    # Ab check karte hain k kya load hua
+                    if len(page.frames) > 1:
+                        log_msg("🧩 CAPTCHA LOADED! Analyzing...")
                         
-                        # CALL THE SOLVER
-                        success = await solve_captcha(page)
+                        # Call Solver (Analysis Mode)
+                        await solve_captcha(page, session_id)
                         
-                        if success:
-                            log_msg("✅ Solver Finished. Checking result...")
-                            await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_after_solve.jpg")
-                        else:
-                            log_msg("❌ Solver Failed.")
+                        # Solve k baad ki recording
+                        await wait_and_capture(page, 5, session_id, "06_post_solve")
                     else:
-                        log_msg("❓ No Captcha detected.")
-                        await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_no_captcha.jpg")
-
+                        log_msg("❓ Captcha did not appear in 10s.")
+            
             await browser.close()
         except Exception as e:
             log_msg(f"❌ Error: {str(e)}")
