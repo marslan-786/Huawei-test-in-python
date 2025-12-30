@@ -1,96 +1,106 @@
 import cv2
 import numpy as np
-import math
+import os
+import shutil
 
 def get_swap_indices(image_path, rows=2, cols=4):
-    print(f"🧠 AI: Analyzing Image {image_path}...")
+    print(f"\n🧠 AI START: Analyzing {image_path}")
     
+    if not os.path.exists(image_path):
+        print("❌ AI ERROR: Image file does not exist!")
+        return 0, 7 # Fail safe force move
+
     # 1. Load Image
     img = cv2.imread(image_path)
     if img is None:
-        print("❌ AI: Image not found/unreadable")
-        return 0, 0 # Fail safe
+        print("❌ AI ERROR: OpenCV could not read image!")
+        return 0, 7
 
     h, w, _ = img.shape
+    print(f"📏 Image Size: {w}x{h}")
+    
     tile_h = h // rows
     tile_w = w // cols
     
-    # 2. Slice Image into 8 Tiles
+    # Debug Folder for Tiles
+    debug_dir = "./captures/debug_tiles"
+    if os.path.exists(debug_dir): shutil.rmtree(debug_dir)
+    os.makedirs(debug_dir)
+
+    # 2. Slice Image
     tiles = []
+    print("✂️ Slicing Image into tiles...")
     for r in range(rows):
         for c in range(cols):
             x1 = c * tile_w
             y1 = r * tile_h
-            # Extract tile
             tile = img[y1:y1+tile_h, x1:x1+tile_w]
             tiles.append(tile)
             
-    # 3. Define Error Function (Edge Matching)
-    # Hum check karenge k tile A ka right border tile B k left border se kitna milta hai
-    def calculate_error(current_order):
-        total_error = 0
-        
-        # Grid reconstruction based on current order
-        grid = [current_order[i:i+cols] for i in range(0, len(current_order), cols)]
+            # Save for visual verify
+            idx = len(tiles) - 1
+            cv2.imwrite(f"{debug_dir}/tile_{idx}.jpg", tile)
+
+    print(f"✅ Saved 8 tiles in {debug_dir}. Check them!")
+
+    # 3. Simple Edge Matching Logic
+    def calculate_score(idx_list):
+        score = 0
+        # Reconstruct grid virtually
+        grid = [idx_list[i:i+cols] for i in range(0, len(idx_list), cols)]
         
         for r in range(rows):
             for c in range(cols):
-                idx = grid[r][c]
-                current_tile = tiles[idx]
+                current_idx = grid[r][c]
+                curr_tile = tiles[current_idx]
                 
-                # Check Right Neighbor error
+                # Compare with Right Neighbor
                 if c < cols - 1:
                     right_idx = grid[r][c+1]
                     right_tile = tiles[right_idx]
-                    # Compare: Current Right Column vs Neighbor Left Column
-                    diff = np.mean(np.abs(current_tile[:, -1] - right_tile[:, 0]))
-                    total_error += diff
-
-                # Check Bottom Neighbor error
+                    # Right edge of current vs Left edge of next
+                    diff = np.mean(np.abs(curr_tile[:, -1] - right_tile[:, 0]))
+                    score += diff
+                
+                # Compare with Bottom Neighbor
                 if r < rows - 1:
                     bottom_idx = grid[r+1][c]
                     bottom_tile = tiles[bottom_idx]
-                    # Compare: Current Bottom Row vs Neighbor Top Row
-                    diff = np.mean(np.abs(current_tile[-1, :] - bottom_tile[0, :]))
-                    total_error += diff
-                    
-        return total_error
+                    # Bottom edge of current vs Top edge of next
+                    diff = np.mean(np.abs(curr_tile[-1, :] - bottom_tile[0, :]))
+                    score += diff
+        return score
 
-    # 4. Brute Force Logic (Try Swapping Every Pair)
-    # Since only 1 pair is swapped, we check all combinations.
-    # Total tiles = 8. Combinations = 28. Very fast.
+    # 4. Find Best Swap
+    original_indices = list(range(rows * cols))
+    best_score = calculate_score(original_indices)
+    best_swap = (0, 0) # Default: No swap
     
-    original_order = list(range(rows * cols))
-    min_error = float('inf')
-    best_swap = (0, 0) # Default (No swap)
-    
-    # Initial error (Current messy state)
-    base_error = calculate_error(original_order)
-    print(f"📊 Initial Chaos Score: {base_error:.2f}")
+    print(f"📊 Initial Chaos Score: {best_score:.2f}")
 
-    # Loop through all pairs (i, j)
-    for i in range(len(original_order)):
-        for j in range(i + 1, len(original_order)):
-            # Create a temporary swapped order
-            temp_order = original_order[:]
-            temp_order[i], temp_order[j] = temp_order[j], temp_order[i]
+    # Check all pairs
+    found_better = False
+    for i in range(len(original_indices)):
+        for j in range(i + 1, len(original_indices)):
+            # Swap virtually
+            temp_indices = original_indices[:]
+            temp_indices[i], temp_indices[j] = temp_indices[j], temp_indices[i]
             
-            # Check error for this swap
-            err = calculate_error(temp_order)
+            new_score = calculate_score(temp_indices)
             
-            if err < min_error:
-                min_error = err
+            # If significant improvement
+            if new_score < best_score:
+                print(f"💡 Potential Swap Found: {i} <-> {j} (Score: {new_score:.2f})")
+                best_score = new_score
                 best_swap = (i, j)
+                found_better = True
 
-    # 5. Conclusion
     source, target = best_swap
     
-    # Validation: Error must significantly drop to justify a swap
-    improvement = base_error - min_error
-    print(f"✅ AI Found Best Swap: Tile {source} <-> Tile {target} (Error: {min_error:.2f})")
+    if source == target:
+        print("⚠️ AI WARNING: No swap improved the image. Logic thinks image is perfect.")
+        print("🔨 FORCE MODE: Returning 0 -> 4 to test movement.")
+        return 0, 4
     
-    if improvement < 5: # Threshold logic
-        print("⚠️ No significant improvement found (Maybe already solved?)")
-        return 0, 0
-        
+    print(f"📢 AI FINAL DECISION: Swap Tile {source} with Tile {target}")
     return source, target
