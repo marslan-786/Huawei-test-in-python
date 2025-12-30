@@ -12,12 +12,11 @@ from playwright.async_api import async_playwright
 # --- CONFIGURATION ---
 CAPTURE_DIR = "./captures"
 VIDEO_PATH = f"{CAPTURE_DIR}/proof.mp4"
-NUMBERS_FILE = "numbers.txt"
 
-# 📱 MOBILE LINK
-MAGIC_URL = "https://id5.cloud.huawei.com/CAS/mobile/standard/register/wapRegister.html#/wapRegister/regByPhone"
+# 🏁 STARTING URL (Root)
+BASE_URL = "https://id5.cloud.huawei.com"
 
-# 👇 PROXY CONFIG 👇
+# 👇 ROTATING PROXY CONFIG (Webshare) 👇
 PROXY_CONFIG = {
     "server": "http://p.webshare.io:80", 
     "username": "wwwsyxzg-rotate", 
@@ -37,16 +36,12 @@ def log_msg(message):
     logs.insert(0, entry)
     if len(logs) > 100: logs.pop()
 
-# --- FILE HELPER ---
-def get_next_number():
-    if not os.path.exists(NUMBERS_FILE): return None
-    with open(NUMBERS_FILE, "r") as f: lines = f.readlines()
-    numbers = [line.strip() for line in lines if line.strip()]
-    if not numbers: return None
-    current_number = numbers[0]
-    new_lines = numbers[1:] + [current_number]
-    with open(NUMBERS_FILE, "w") as f: f.write("\n".join(new_lines))
-    return current_number
+# --- HELPER: HK NUMBER GENERATOR ---
+def generate_hk_number():
+    # HK numbers: 8 digits, start with 5, 6, 8, 9
+    prefix = random.choice(['5', '6', '9'])
+    rest = ''.join([str(random.randint(0, 9)) for _ in range(7)])
+    return f"{prefix}{rest}"
 
 # --- DASHBOARD ---
 @app.get("/", response_class=HTMLResponse)
@@ -54,28 +49,28 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Deep Stealth</title>
+        <title>Huawei Organic Flow</title>
         <style>
-            body { background: #000; color: #00e5ff; font-family: monospace; padding: 20px; text-align: center; }
-            button { padding: 15px 30px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #d50000; color: white; border-radius: 4px; }
-            .logs { height: 350px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #111; margin-bottom: 20px; }
-            .gallery img { height: 250px; border: 2px solid #333; margin: 3px; border-radius: 10px; }
+            body { background: #111; color: #ffeb3b; font-family: monospace; padding: 20px; text-align: center; }
+            button { padding: 15px 30px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #c2185b; color: white; border-radius: 4px; }
+            .logs { height: 350px; overflow-y: auto; text-align: left; border: 1px solid #444; padding: 10px; background: #000; margin-bottom: 20px; }
+            .gallery img { height: 250px; border: 2px solid #555; margin: 3px; border-radius: 10px; }
             #video-section { display:none; margin-top:20px; }
         </style>
     </head>
     <body>
-        <h1>🥷 DEEP STEALTH: REGION INJECTOR</h1>
-        <p>Forcing Region: PK | Emulating: Samsung S23 Ultra</p>
-        <button onclick="startBot()">🚀 START DEEP AGENT</button>
-        <button onclick="refreshData()" style="background: #2979ff;">🔄 REFRESH</button>
-        <button onclick="makeVideo()" style="background: #00c853;">🎬 MAKE VIDEO</button>
+        <h1>🔄 HUAWEI FULL ORGANIC FLOW (HK TEST)</h1>
+        <p>Steps: Register > Agree > DOB (<2000) > Phone (HK) > OTP</p>
+        <button onclick="startBot()">🚀 START FULL FLOW</button>
+        <button onclick="refreshData()" style="background: #009688;">🔄 REFRESH</button>
+        <button onclick="makeVideo()" style="background: #e91e63;">🎬 MAKE VIDEO</button>
         
         <div class="logs" id="logs">Waiting...</div>
         <div id="video-section"><video id="v-player" controls height="450"></video></div>
         <div id="gallery"></div>
 
         <script>
-            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> INJECTING SCRIPT..."); }
+            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> INITIALIZING FLOW..."); }
             function refreshData() {
                 fetch('/status').then(r=>r.json()).then(d=>{
                     document.getElementById('logs').innerHTML = d.logs.map(l=>`<div>${l}</div>`).join('');
@@ -105,7 +100,7 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    bt.add_task(run_deep_agent)
+    bt.add_task(run_organic_agent)
     return {"status": "started"}
 
 @app.post("/generate_video")
@@ -118,7 +113,7 @@ async def trigger_video():
         return {"status": "done"}
     except: return {"status": "error"}
 
-# --- VISUAL TOUCH ---
+# --- VISUAL TAP ---
 async def visual_tap(page, element, desc):
     try:
         box = await element.bounding_box()
@@ -129,160 +124,162 @@ async def visual_tap(page, element, desc):
             await page.evaluate(f"""
                 var dot = document.createElement('div');
                 dot.style.position = 'absolute'; left = '{x}px'; top = '{y}px';
-                dot.style.width = '20px'; height = '20px'; background = 'rgba(255, 0, 0, 0.5)';
+                dot.style.width = '20px'; height = '20px'; background = 'rgba(255, 0, 255, 0.6)';
                 dot.style.borderRadius = '50%'; border = '2px solid white'; zIndex = '99999';
                 document.body.appendChild(dot);
             """)
             
             log_msg(f"👆 Tapping {desc}...")
             await page.touchscreen.tap(x, y)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1) 
             return True
     except: pass
     return False
 
-# --- MAIN AGENT ---
-async def run_deep_agent():
+# --- MAIN AGENT (FULL FLOW) ---
+async def run_organic_agent():
     try:
         for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
         
-        while True:
-            current_number = get_next_number()
-            if not current_number:
-                log_msg("❌ No numbers left!")
-                return
+        current_number = generate_hk_number()
+        log_msg(f"📱 Testing with HK Number: {current_number}")
+
+        async with async_playwright() as p:
+            # S23 Ultra Profile (Android 13)
+            pixel_5 = p.devices['Pixel 5'] # Using Pixel 5 template but modifying UA
             
-            log_msg(f"📱 Processing: {current_number}")
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+                proxy=PROXY_CONFIG
+            )
 
-            async with async_playwright() as p:
-                # 1. ARGS TO HIDE AUTOMATION
-                args = [
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--use-gl=egl",
-                    "--disable-dev-shm-usage",
-                    # Important: Ignore default automation flags
-                    "--disable-infobars",
-                    "--hide-scrollbars",
-                ]
+            context = await browser.new_context(
+                **pixel_5,
+                user_agent="Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.101 Mobile Safari/537.36",
+                locale="en-US"
+            )
+            
+            page = await context.new_page()
 
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=args,
-                    proxy=PROXY_CONFIG,
-                    # Ignore default playwright args that leak identity
-                    ignore_default_args=["--enable-automation"] 
-                )
-
-                # 2. SAMSUNG S23 ULTRA PROFILE
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.101 Mobile Safari/537.36",
-                    viewport={"width": 412, "height": 915},
-                    device_scale_factor=3.0,
-                    is_mobile=True,
-                    has_touch=True,
-                    timezone_id="Asia/Karachi", # Force PK Timezone
-                    locale="en-PK"
-                )
-                
-                # 3. FORCE NETWORK HEADERS (Client Hints)
-                # Ye sab se important hai! Huawei ko batata hai k platform Android hai
-                await context.set_extra_http_headers({
-                    "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-                    "sec-ch-ua-mobile": "?1",
-                    "sec-ch-ua-platform": '"Android"',
-                    "Upgrade-Insecure-Requests": "1"
-                })
-
-                page = await context.new_page()
-
-                # 4. INJECT REGION & REMOVE WEBDRIVER (Before Page Load)
-                await page.add_init_script("""
-                    // 1. Hide WebDriver
-                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                    
-                    // 2. Force LocalStorage for Region PK
-                    // Huawei uses localStorage keys like 'countryCode', 'regionCode'
-                    try {
-                        localStorage.setItem('countryCode', 'pk');
-                        localStorage.setItem('regionCode', 'pk');
-                        localStorage.setItem('site', 'pk');
-                        localStorage.setItem('lang', 'en-us');
-                    } catch(e) {}
-                """)
-
-                log_msg("🚀 Loading Page (With Injected Region PK)...")
-                try:
-                    await page.goto(MAGIC_URL, timeout=60000)
-                except:
-                    log_msg("❌ Network Fail")
-                    await browser.close()
-                    continue
-
-                await page.wait_for_load_state("networkidle")
-                await asyncio.sleep(4)
-                await page.screenshot(path=f"{CAPTURE_DIR}/monitor_01_loaded.jpg")
-
-                # FIND INPUT
-                inp = page.locator("input[type='tel']").first
-                if await inp.count() == 0: inp = page.locator("input").first
-                
-                if await inp.count() > 0:
-                    await visual_tap(page, inp, "Input")
-                    
-                    # Human Typing
-                    for char in current_number:
-                        await page.keyboard.type(char)
-                        await asyncio.sleep(random.uniform(0.1, 0.3))
-                    
-                    await page.touchscreen.tap(10, 100) # Blur
-                    await page.screenshot(path=f"{CAPTURE_DIR}/monitor_02_typed.jpg")
-                else:
-                    log_msg("❌ Input Not Found")
-                    await browser.close()
-                    continue
-
-                # GET CODE
-                retry = 0
-                max_retries = 2
-                
-                while retry < max_retries:
-                    retry += 1
-                    btn = page.locator(".get-code-btn").first
-                    if await btn.count() == 0: btn = page.get_by_text("Get code", exact=False).first
-                    
-                    if await btn.count() > 0:
-                        await visual_tap(page, btn, "Get Code")
-                        log_msg("⏳ Waiting 5s...")
-                        await asyncio.sleep(5)
-                    else:
-                        log_msg("❌ Button Lost")
-                        break
-                    
-                    await page.screenshot(path=f"{CAPTURE_DIR}/monitor_{current_number}_{retry}.jpg")
-
-                    # CHECK SUCCESS
-                    if len(page.frames) > 1 or await page.locator("iframe").count() > 0:
-                        log_msg("🎉 BINGO! CAPTCHA DETECTED! (Region PK Success)")
-                        await page.screenshot(path=f"{CAPTURE_DIR}/monitor_SUCCESS.jpg")
-                        await browser.close()
-                        return
-
-                    # CHECK ERROR
-                    if await page.get_by_text("Unexpected problem").count() > 0:
-                        log_msg(f"🛑 Blocked on Try {retry}")
-                        ok = page.get_by_text("OK").first
-                        if await ok.count() > 0:
-                            await visual_tap(page, ok, "OK")
-                            log_msg("⏳ Waiting 10s...")
-                            await asyncio.sleep(10)
-                        else: await asyncio.sleep(5)
-                    else:
-                        log_msg("❓ Checking again...")
-                        await asyncio.sleep(2)
-
-                log_msg("❌ Rotating...")
+            # --- STEP 1: LANDING PAGE ---
+            log_msg("🚀 Loading Base URL...")
+            try:
+                await page.goto(BASE_URL, timeout=60000)
+            except:
+                log_msg("❌ Network Fail")
                 await browser.close()
+                return
+
+            await page.wait_for_load_state("networkidle")
+            await asyncio.sleep(3)
+            await page.screenshot(path=f"{CAPTURE_DIR}/01_landing.jpg")
+
+            # --- STEP 1.5: CLICK REGISTER ---
+            # Finding Register Link/Button
+            reg_btn = page.get_by_text("Register", exact=True).first
+            if await reg_btn.count() == 0: reg_btn = page.get_by_role("button", name="Register").first
+            
+            if await reg_btn.count() > 0:
+                await visual_tap(page, reg_btn, "Register Button")
+                await asyncio.sleep(4)
+                await page.screenshot(path=f"{CAPTURE_DIR}/02_register_clicked.jpg")
+            else:
+                log_msg("⚠️ Register button not found directly, maybe already on register page?")
+
+            # --- STEP 2: AGREE TO TERMS (Tick & Next) ---
+            # Default Country is HK (We don't change)
+            
+            # Find the Checkbox Text to click
+            # Usually text is "Huawei ID User Agreement"
+            agreement_text = page.get_by_text("Huawei ID User Agreement").first
+            if await agreement_text.count() > 0:
+                await visual_tap(page, agreement_text, "User Agreement Text (To Tick)")
+                await asyncio.sleep(1)
+            
+            # Click AGREE / NEXT
+            agree_btn = page.get_by_text("Agree", exact=True).first
+            if await agree_btn.count() == 0: agree_btn = page.get_by_text("Next", exact=True).first
+            
+            if await agree_btn.count() > 0:
+                await visual_tap(page, agree_btn, "Agree/Next")
+                await asyncio.sleep(4)
+                await page.screenshot(path=f"{CAPTURE_DIR}/03_after_agree.jpg")
+            else:
+                log_msg("❌ Agree Button Not Found")
+
+            # --- STEP 3: DATE OF BIRTH (< 2000) ---
+            log_msg("📅 Handling DOB...")
+            
+            # Try to find the Year column and scroll it
+            # This is tricky on mobile web, but let's try a swipe gesture in the middle of screen
+            # Assuming DOB picker is visible
+            
+            # Swipe Down 3 times to change year from 2024 -> 2000s
+            for _ in range(3):
+                # Start from middle-bottom and swipe down (pulling numbers down = going back in years?)
+                # Actually dragging down usually scrolls UP the list (Previous years).
+                await page.mouse.move(200, 500)
+                await page.mouse.down()
+                await page.mouse.move(200, 700, steps=10) # Drag down
+                await page.mouse.up()
+                await asyncio.sleep(0.5)
+
+            await page.screenshot(path=f"{CAPTURE_DIR}/04_dob_scrolled.jpg")
+            
+            # Click NEXT on DOB
+            dob_next = page.get_by_text("Next", exact=True).first
+            if await dob_next.count() > 0:
+                await visual_tap(page, dob_next, "DOB Next")
+                await asyncio.sleep(4)
+            
+            # --- STEP 4: USE PHONE NUMBER ---
+            use_phone = page.get_by_text("Use phone number", exact=False).first
+            if await use_phone.count() > 0:
+                await visual_tap(page, use_phone, "Use Phone Option")
+                await asyncio.sleep(2)
+
+            await page.screenshot(path=f"{CAPTURE_DIR}/05_phone_input_screen.jpg")
+
+            # --- STEP 5: INPUT HK NUMBER & GET CODE ---
+            inp = page.locator("input[type='tel']").first
+            if await inp.count() == 0: inp = page.locator("input").first
+            
+            if await inp.count() > 0:
+                await visual_tap(page, inp, "Phone Input")
+                
+                # Type HK Number
+                for char in current_number:
+                    await page.keyboard.type(char)
+                    await asyncio.sleep(0.2)
+                
+                await page.touchscreen.tap(10, 100) # Blur
+                
+                # GET CODE
+                get_code = page.locator(".get-code-btn").first
+                if await get_code.count() == 0: get_code = page.get_by_text("Get code", exact=False).first
+                
+                if await get_code.count() > 0:
+                    await visual_tap(page, get_code, "GET CODE BUTTON")
+                    log_msg("⏳ Waiting 10s for result...")
+                    await asyncio.sleep(10) # Wait to see if error or captcha
+                    
+                    await page.screenshot(path=f"{CAPTURE_DIR}/06_final_result.jpg")
+                    
+                    # Final Check
+                    if len(page.frames) > 1:
+                        log_msg("🎉 BINGO! CAPTCHA DETECTED!")
+                    elif await page.get_by_text("Unexpected problem").count() > 0:
+                        log_msg("🛑 Error Popup Detected")
+                    else:
+                        log_msg("❓ No obvious popup, check video")
+                else:
+                    log_msg("❌ Get Code button not found")
+            else:
+                log_msg("❌ Input field not found")
+
+            log_msg("✅ Session End")
+            await browser.close()
 
     except Exception as e:
         log_msg(f"❌ Error: {str(e)}")
