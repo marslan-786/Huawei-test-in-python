@@ -1,52 +1,33 @@
 import asyncio
-import random
-import time
 import math
 
-# Huawei Tile Swap is usually 4 Columns x 2 Rows
+# Grid 4x2
 ROWS = 2
 COLS = 4
 
 async def solve_captcha(page, session_id):
-    print("🧠 SOLVER: Initializing Grid System...")
+    print("🧠 SOLVER: Hold & Drag (0 -> 7)...")
     
-    # 1. FIND THE CAPTCHA FRAME
+    # 1. FIND FRAME
     frames = page.frames
     captcha_frame = None
-    
-    # Frame dhoondo jisme image ho
     for frame in frames:
         try:
-            if await frame.locator(".uc-captcha-drag-area").count() > 0 or \
-               await frame.locator("canvas").count() > 0:
+            if await frame.locator(".uc-captcha-drag-area").count() > 0:
                 captcha_frame = frame
                 break
         except: continue
     
-    # Fallback to main page if no frame found (Sometimes popup is on main page)
-    if not captcha_frame:
-        print("⚠️ Frame not found, trying main page context...")
-        captcha_frame = page
+    if not captcha_frame and len(frames) > 1: captcha_frame = frames[-1]
+    if not captcha_frame: return False
 
-    # 2. LOCATE CAPTCHA CONTAINER
-    # Try multiple selectors used by Huawei
+    # 2. BOX
     container = captcha_frame.locator(".uc-captcha-drag-area").first
-    if await container.count() == 0:
-        container = captcha_frame.locator("#captcha-container").first
-    
-    if await container.count() == 0:
-        print("❌ Captcha Container Not Found!")
-        return False
-
-    # Get Coordinates
+    if await container.count() == 0: container = captcha_frame.locator("#captcha-container").first
     box = await container.bounding_box()
-    if not box:
-        print("❌ Box coordinates missing")
-        return False
+    if not box: return False
 
-    print(f"📏 Captcha Found: {box['width']}x{box['height']}")
-
-    # 3. DRAW GRID (Visual Debugging)
+    # 3. COORDINATES
     tile_width = box['width'] / COLS
     tile_height = box['height'] / ROWS
     
@@ -57,58 +38,41 @@ async def solve_captcha(page, session_id):
         y = box['y'] + (row * tile_height) + (tile_height / 2)
         return x, y
 
-    # Draw Yellow Dots on Screen
-    for i in range(ROWS * COLS):
-        tx, ty = get_tile_center(i)
-        await page.evaluate(f"""
-            var dot = document.createElement('div');
-            dot.style.position = 'absolute';
-            dot.style.left = '{tx}px';
-            dot.style.top = '{ty}px';
-            dot.style.width = '20px';
-            dot.style.height = '20px';
-            dot.style.backgroundColor = 'yellow';
-            dot.style.color = 'black';
-            dot.style.fontWeight = 'bold';
-            dot.style.textAlign = 'center';
-            dot.style.borderRadius = '50%';
-            dot.style.zIndex = '999999';
-            dot.innerText = '{i}';
-            document.body.appendChild(dot);
-        """)
-
-    # Screenshot with Grid
-    await asyncio.sleep(1)
-    await page.screenshot(path=f"./captures/{session_id}_06_GRID_READY.jpg")
-    print("📸 Grid Screenshot Saved!")
-
-    # 4. EXECUTE TEST SWAP (Tile 0 <-> Tile 4)
-    # Ye hum check karne k liye kar rahay hain k drag kaam kar raha hai ya nahi
-    source_idx = 0 # Top-Left
-    target_idx = 4 # Bottom-Left
+    # --- SWAP 0 -> 7 ---
+    source_idx = 0  # First Tile (Top Left)
+    target_idx = 7  # Last Tile (Bottom Right)
     
     sx, sy = get_tile_center(source_idx)
     tx, ty = get_tile_center(target_idx)
-    
-    print(f"🔄 SWAPPING Tile {source_idx} -> Tile {target_idx}")
-    
-    # MOUSE ACTION
-    # 1. Move to Source
+
+    # VISUAL MARKERS
+    await page.evaluate(f"""
+        var d1 = document.createElement('div');
+        d1.style.position = 'absolute'; left='{sx}px'; top='{sy}px';
+        d1.style.width='20px'; height='20px'; background='blue'; borderRadius='50%'; zIndex='999999';
+        document.body.appendChild(d1);
+        
+        var d2 = document.createElement('div');
+        d2.style.position = 'absolute'; left='{tx}px'; top='{ty}px';
+        d2.style.width='20px'; height='20px'; background='lime'; borderRadius='50%'; zIndex='999999';
+        document.body.appendChild(d2);
+    """)
+    await asyncio.sleep(0.5)
+
+    # --- EXECUTE FORCE DRAG ---
+    print(f"🖱️ Moving to Source {source_idx}...")
     await page.mouse.move(sx, sy, steps=5)
     await asyncio.sleep(0.5)
     
-    # 2. Grab (Down)
+    print("✊ HOLDING (Mouse Down)...")
     await page.mouse.down()
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(1) # FORCE HOLD (1 Second)
     
-    # 3. Drag to Target (Slowly)
-    await page.mouse.move(tx, ty, steps=20) 
-    await asyncio.sleep(0.5)
+    print(f"🖱️ Dragging to Target {target_idx}...")
+    await page.mouse.move(tx, ty, steps=25) # Slow Drag
+    await asyncio.sleep(1) # HOLD AT TARGET
     
-    # 4. Drop (Up)
+    print("✋ RELEASING (Mouse Up)...")
     await page.mouse.up()
-    
-    print("✅ Swap Done! Waiting for result...")
-    await asyncio.sleep(3)
     
     return True

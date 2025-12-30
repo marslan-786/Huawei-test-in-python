@@ -10,6 +10,9 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from playwright.async_api import async_playwright
 
+# --- IMPORT SOLVER ---
+from captcha_solver import solve_captcha
+
 # --- CONFIGURATION ---
 CAPTURE_DIR = "./captures"
 VIDEO_PATH = f"{CAPTURE_DIR}/proof.mp4"
@@ -33,24 +36,23 @@ def log_msg(message):
     entry = f"[{timestamp}] {message}"
     print(entry)
     logs.insert(0, entry)
-    if len(logs) > 300: logs.pop()
+    if len(logs) > 500: logs.pop()
 
 def generate_russia_number():
     prefix = "9"
     rest = ''.join([str(random.randint(0, 9)) for _ in range(9)])
     return f"{prefix}{rest}"
 
-# --- DASHBOARD (UPDATED UI) ---
+# --- DASHBOARD ---
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Ultimate Bot</title>
+        <title>Huawei Unlimited</title>
         <style>
             body { background: #000; color: #00e676; font-family: monospace; padding: 20px; text-align: center; }
-            button { padding: 12px 24px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #6200ea; color: white; border-radius: 4px; font-size: 14px; }
-            button:hover { opacity: 0.8; }
+            button { padding: 12px 24px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #6200ea; color: white; border-radius: 4px; }
             
             .status-bar { 
                 background: #333; color: yellow; padding: 10px; margin: 10px auto; 
@@ -59,7 +61,6 @@ async def dashboard():
 
             .logs { height: 250px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #111; margin-bottom: 20px; font-size: 12px; color: #ccc; }
             
-            /* VIDEO SECTION IN MIDDLE */
             #video-section { 
                 display:none; 
                 margin: 20px auto; 
@@ -70,19 +71,20 @@ async def dashboard():
                 border-radius: 10px;
             }
 
+            /* GALLERY: Infinite Scroll */
             .gallery { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-top: 20px; }
-            .gallery img { height: 80px; border: 1px solid #333; opacity: 0.8; }
-            .gallery img:hover { opacity: 1; border-color: white; transform: scale(1.1); transition: 0.2s; }
+            .gallery img { height: 60px; border: 1px solid #333; opacity: 0.9; }
+            .gallery img:hover { height: 150px; border-color: white; z-index:999; transition: 0.1s; }
         </style>
     </head>
     <body>
-        <h1>🇷🇺 RUSSIA SWITCH + 0.1s CAPTURE</h1>
-        <p>Fixes: "Russia +7" Detection | Video UI Position</p>
+        <h1>🇷🇺 RUSSIA: 0 -> 7 SWAP TEST</h1>
+        <p>Unlimited History | Robust Video Gen | Hold & Drag</p>
         
         <div>
             <button onclick="startBot()">🚀 START TEST</button>
             <button onclick="makeVideo()" style="background: #e91e63;">🎬 GENERATE VIDEO</button>
-            <button onclick="refreshData()" style="background: #2962ff;">🔄 REFRESH DATA</button>
+            <button onclick="refreshData()" style="background: #2962ff;">🔄 REFRESH ALL</button>
         </div>
 
         <div id="status-bar" class="status-bar"></div>
@@ -90,11 +92,11 @@ async def dashboard():
         <div class="logs" id="logs">Waiting...</div>
         
         <div id="video-section">
-            <h3 style="margin-top:0; color: #00e676;">🎬 REPLAY (10 FPS)</h3>
-            <video id="v-player" controls width="450" autoplay loop></video>
+            <h3 style="margin-top:0; color: #00e676;">🎬 REPLAY</h3>
+            <video id="v-player" controls width="500" autoplay loop></video>
         </div>
 
-        <h3>🎞️ LIVE FRAME FEED</h3>
+        <h3>🎞️ FULL HISTORY FEED</h3>
         <div class="gallery" id="gallery"></div>
 
         <script>
@@ -110,7 +112,7 @@ async def dashboard():
             function makeVideo() {
                 var status = document.getElementById('status-bar');
                 status.style.display = 'block';
-                status.innerText = "⏳ GENERATING VIDEO... (Processing Images)";
+                status.innerText = "⏳ PROCESSING THOUSANDS OF FRAMES... PLEASE WAIT...";
                 status.style.color = "yellow";
 
                 fetch('/generate_video', {method: 'POST'}).then(r=>r.json()).then(d=>{
@@ -126,14 +128,14 @@ async def dashboard():
                         player.load();
                         player.play();
                     } else {
-                        status.innerText = "❌ ERROR GENERATING VIDEO";
+                        status.innerText = "❌ ERROR: " + d.error;
                         status.style.color = "red";
                     }
                 });
             }
 
             function logUpdate(msg) { document.getElementById('logs').innerHTML = "<div>" + msg + "</div>" + document.getElementById('logs').innerHTML; }
-            setInterval(refreshData, 3000);
+            setInterval(refreshData, 5000); // Refresh every 5s to save browser CPU
         </script>
     </body>
     </html>
@@ -141,7 +143,8 @@ async def dashboard():
 
 @app.get("/status")
 async def get_status():
-    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'), key=os.path.getmtime, reverse=True)[:60]
+    # SHOW ALL IMAGES (No Limit)
+    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'), key=os.path.getmtime, reverse=True)
     urls = [f"/captures/{os.path.basename(f)}" for f in files]
     return JSONResponse({"logs": logs, "images": urls})
 
@@ -152,15 +155,23 @@ async def start_bot(bt: BackgroundTasks):
 
 @app.post("/generate_video")
 async def trigger_video():
-    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'))
-    if not files: return {"status": "error"}
+    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg')) # Timestamp sort is automatic by name usually
+    if not files: return {"status": "error", "error": "No images found"}
+    
     try:
-        with imageio.get_writer(VIDEO_PATH, fps=10, format='FFMPEG') as writer:
-            for filename in files: writer.append_data(imageio.imread(filename))
+        # Optimized Writer
+        with imageio.get_writer(VIDEO_PATH, fps=15, format='FFMPEG', quality=8) as writer:
+            for filename in files:
+                try:
+                    # Read image safely
+                    img = imageio.imread(filename)
+                    writer.append_data(img)
+                except:
+                    continue # Skip broken images
         return {"status": "done"}
     except Exception as e:
-        print(e)
-        return {"status": "error"}
+        print(f"Video Error: {e}")
+        return {"status": "error", "error": str(e)}
 
 async def visual_tap(page, element, desc):
     try:
@@ -194,9 +205,10 @@ async def burst_wait(page, seconds, step_name):
 
 # --- MAIN FLOW ---
 async def run_russia_flow():
-    for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
+    # NO DELETION! History preserved.
+    
     current_number = generate_russia_number()
-    log_msg(f"🎬 Starting Russia Test | Number: {current_number}")
+    log_msg(f"🎬 Start Session | Number: {current_number}")
 
     async with async_playwright() as p:
         pixel_5 = p.devices['Pixel 5'].copy()
@@ -232,6 +244,7 @@ async def run_russia_flow():
             # Terms
             agree_text = page.get_by_text("Huawei ID User Agreement").first
             if await agree_text.count() > 0: await visual_tap(page, agree_text, "Terms")
+            
             agree_btn = page.get_by_text("Agree", exact=True).first
             if await agree_btn.count() == 0: agree_btn = page.get_by_text("Next", exact=True).first
             if await agree_btn.count() > 0:
@@ -254,7 +267,6 @@ async def run_russia_flow():
 
             # --- COUNTRY SWITCH ---
             log_msg("🌍 Switching to RUSSIA...")
-            
             hk_selector = page.get_by_text("Hong Kong").first
             if await hk_selector.count() == 0: hk_selector = page.get_by_text("Country/Region").first
             
@@ -263,7 +275,7 @@ async def run_russia_flow():
                 await burst_wait(page, 2, "06_list_opened")
                 
                 # Check search
-                if await page.locator("input[type='search']").count() > 0 or await page.locator("input").count() > 0:
+                if await page.locator("input").count() > 0:
                     search_box = page.locator("input").first
                     await visual_tap(page, search_box, "Search_Box")
                     
@@ -271,16 +283,12 @@ async def run_russia_flow():
                     await page.keyboard.type("Russia", delay=100)
                     await burst_wait(page, 2, "07_typed")
 
-                    # --- 🔥 FIXED SELECTOR: SMART MATCH ---
-                    # Will match "Russia", "Russia +7", "Russia (Federation)" etc.
                     target = page.get_by_text("Russia", exact=False).first
-                    
                     if await target.count() > 0:
                         await visual_tap(page, target, "Select_Russia")
                         await burst_wait(page, 3, "08_russia_set")
                     else:
-                        log_msg("❌ Russia not found (Smart match failed)")
-                        await page.screenshot(path=f"{CAPTURE_DIR}/DEBUG_NO_RUSSIA.jpg")
+                        log_msg("❌ Russia not found")
             
             # INPUT & CODE
             inp = page.locator("input[type='tel']").first
@@ -300,8 +308,16 @@ async def run_russia_flow():
                 
                 if await get_code.count() > 0:
                     await visual_tap(page, get_code, "GET CODE")
-                    log_msg("⏳ Waiting 10s (Burst)...")
+                    log_msg("⏳ Waiting 10s for CAPTCHA...")
                     await burst_wait(page, 10, "10_final")
+
+                    # CHECK FOR CAPTCHA AND SOLVE
+                    if len(page.frames) > 1:
+                        log_msg("🧩 CAPTCHA FOUND! Initiating 0->7 Swap...")
+                        await solve_captcha(page, "SESSION_X")
+                        await burst_wait(page, 5, "11_post_swap")
+                    else:
+                         log_msg("❓ No Captcha Frame.")
 
             await browser.close()
             log_msg("✅ Finished. Generate Video to watch.")
