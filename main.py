@@ -32,7 +32,7 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Precision Bot</title>
+        <title>Huawei Captcha Watcher</title>
         <style>
             body { background: #000; color: #00ff00; font-family: monospace; padding: 20px; text-align: center; }
             .box { border: 1px solid #333; padding: 15px; margin: 10px auto; max-width: 800px; background: #111; }
@@ -42,17 +42,17 @@ async def dashboard():
         </style>
     </head>
     <body>
-        <h1>🎯 HUAWEI PRECISION BOT (FIXED)</h1>
+        <h1>🔭 HUAWEI CAPTCHA WATCHER</h1>
         <div class="box">
-            <button onclick="startBot()">🚀 START ACCURATE MODE</button>
-            <button onclick="refreshData()" style="background: #3498db;">🔄 REFRESH</button>
+            <button onclick="startBot()">🚀 START & WATCH</button>
+            <button onclick="refreshData()" style="background: #3498db;">🔄 REFRESH VIEW</button>
         </div>
-        <div class="box logs" id="logs">Waiting for command...</div>
+        <div class="box logs" id="logs">Ready...</div>
         <div class="box gallery" id="gallery"></div>
         <script>
             function startBot() {
                 fetch('/start', {method: 'POST'});
-                document.getElementById('logs').innerHTML = "<div>>>> STARTING SEQUENCE...</div>" + document.getElementById('logs').innerHTML;
+                document.getElementById('logs').innerHTML = "<div>>>> STARTING...</div>" + document.getElementById('logs').innerHTML;
                 setTimeout(refreshData, 2000);
             }
             function refreshData() {
@@ -74,11 +74,11 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    log_msg(">>> COMMAND: Start Precision Mode (No AI)")
+    log_msg(">>> COMMAND: Start & Monitor Mode")
     bt.add_task(run_precision_agent)
     return {"status": "started"}
 
-# --- HELPER: SHOW RED DOT (Now with Ghost Mode) ---
+# --- HELPER: SHOW RED DOT (Ghost Mode) ---
 async def show_red_dot(page, selector=None, x=None, y=None):
     if selector:
         box = await selector.bounding_box()
@@ -87,7 +87,6 @@ async def show_red_dot(page, selector=None, x=None, y=None):
             y = box['y'] + box['height'] / 2
     
     if x and y:
-        # NOTE: Added 'pointerEvents: none' so clicks pass through it!
         await page.evaluate(f"""
             var d = document.createElement('div');
             d.style.position='absolute';d.style.left='{x-10}px';d.style.top='{y-10}px';
@@ -124,51 +123,57 @@ async def run_precision_agent():
             await asyncio.sleep(2)
             await page.screenshot(path=f"{CAPTURE_DIR}/01_loaded.jpg")
 
-            # --- STEP 1: FIND PHONE INPUT ---
+            # --- STEP 1: PHONE INPUT ---
             log_msg("🔍 Finding 'Phone number' field...")
-            
             phone_input = page.locator("input[type='tel']") 
             
             if await phone_input.count() > 0:
-                # 1. Show Dot (Non-blocking now)
                 await show_red_dot(page, selector=phone_input.first)
                 await page.screenshot(path=f"{CAPTURE_DIR}/02_target_phone.jpg")
                 
-                # 2. Force Click (Just in case)
-                log_msg("⚡ Clicking Input Field...")
+                log_msg("⚡ Clicking & Typing...")
                 await phone_input.first.click(force=True) 
-                
-                # 3. Fill Number
-                log_msg(f"⌨️ Typing: {TARGET_PHONE}")
-                await phone_input.first.fill(TARGET_PHONE) # 'fill' is better than 'type'
+                await phone_input.first.fill(TARGET_PHONE)
                 await asyncio.sleep(1)
                 await page.screenshot(path=f"{CAPTURE_DIR}/03_filled.jpg")
             else:
-                log_msg("❌ ERROR: Could not find Phone Input field!")
+                log_msg("❌ ERROR: Input not found!")
                 return
 
-            # --- STEP 2: FIND GET CODE BUTTON ---
-            log_msg("🔍 Finding 'Get code' button...")
-            
+            # --- STEP 2: GET CODE BUTTON ---
+            log_msg("🔍 Clicking 'Get code'...")
             get_code_btn = page.get_by_text("Get code")
             
             if await get_code_btn.count() > 0:
                 await show_red_dot(page, selector=get_code_btn.first)
                 await page.screenshot(path=f"{CAPTURE_DIR}/04_target_button.jpg")
                 
-                # Force click here too
+                # Click and start watching immediately
                 await get_code_btn.first.click(force=True)
-                log_msg("✅ Clicked 'Get code'")
+                log_msg("✅ Clicked! NOW WATCHING...")
             else:
-                log_msg("❌ ERROR: 'Get code' text not found!")
+                log_msg("❌ ERROR: Button not found!")
 
-            # --- MONITORING ---
-            log_msg("👀 Monitoring Response...")
-            for i in range(5):
+            # --- EXTENDED MONITORING (30 Seconds) ---
+            log_msg("👀 Watching for CAPTCHA/Errors (30s)...")
+            
+            for i in range(1, 16): # 15 steps * 2 seconds = 30 seconds
                 await asyncio.sleep(2)
-                await page.screenshot(path=f"{CAPTURE_DIR}/monitor_{i}.jpg")
+                timestamp = datetime.now().strftime("%S")
+                path = f"{CAPTURE_DIR}/monitor_{i}_{timestamp}.jpg"
+                await page.screenshot(path=path)
+                
+                # Check for common popup elements
+                # Huawei captchas often live in iframes or divs with 'dialog'
+                if await page.locator("iframe").count() > 0:
+                    log_msg(f"⚠️ CAPTCHA/IFRAME DETECTED (Frame {i})")
+                
+                # Check for error text
+                content = await page.content()
+                if "error" in content.lower() or "failed" in content.lower():
+                     log_msg(f"⚠️ Possible ERROR text detected (Frame {i})")
 
-            log_msg("✅ Mission Accomplished.")
+            log_msg("✅ Monitoring Finished. Check Gallery.")
             await browser.close()
 
     except Exception as e:
