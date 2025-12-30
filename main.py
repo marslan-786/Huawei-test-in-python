@@ -13,10 +13,10 @@ from playwright.async_api import async_playwright
 CAPTURE_DIR = "./captures"
 VIDEO_PATH = f"{CAPTURE_DIR}/proof.mp4"
 
-# 🏁 STARTING URL (Root)
+# 🏁 STARTING URL
 BASE_URL = "https://id5.cloud.huawei.com"
 
-# 👇 ROTATING PROXY CONFIG (Webshare) 👇
+# 👇 PROXY CONFIG 👇
 PROXY_CONFIG = {
     "server": "http://p.webshare.io:80", 
     "username": "wwwsyxzg-rotate", 
@@ -36,9 +36,8 @@ def log_msg(message):
     logs.insert(0, entry)
     if len(logs) > 100: logs.pop()
 
-# --- HELPER: HK NUMBER GENERATOR ---
+# --- HK NUMBER GENERATOR ---
 def generate_hk_number():
-    # HK numbers: 8 digits, start with 5, 6, 8, 9
     prefix = random.choice(['5', '6', '9'])
     rest = ''.join([str(random.randint(0, 9)) for _ in range(7)])
     return f"{prefix}{rest}"
@@ -49,28 +48,28 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Organic Flow</title>
+        <title>Huawei Fixed Flow</title>
         <style>
-            body { background: #111; color: #ffeb3b; font-family: monospace; padding: 20px; text-align: center; }
-            button { padding: 15px 30px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #c2185b; color: white; border-radius: 4px; }
+            body { background: #111; color: #00e676; font-family: monospace; padding: 20px; text-align: center; }
+            button { padding: 15px 30px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #6200ea; color: white; border-radius: 4px; }
             .logs { height: 350px; overflow-y: auto; text-align: left; border: 1px solid #444; padding: 10px; background: #000; margin-bottom: 20px; }
             .gallery img { height: 250px; border: 2px solid #555; margin: 3px; border-radius: 10px; }
             #video-section { display:none; margin-top:20px; }
         </style>
     </head>
     <body>
-        <h1>🔄 HUAWEI FULL ORGANIC FLOW (HK TEST)</h1>
-        <p>Steps: Register > Agree > DOB (<2000) > Phone (HK) > OTP</p>
-        <button onclick="startBot()">🚀 START FULL FLOW</button>
-        <button onclick="refreshData()" style="background: #009688;">🔄 REFRESH</button>
-        <button onclick="makeVideo()" style="background: #e91e63;">🎬 MAKE VIDEO</button>
+        <h1>🔄 HUAWEI ORGANIC FLOW (FIXED)</h1>
+        <p>Using Pixel 5 Device Profile + Samsung UA</p>
+        <button onclick="startBot()">🚀 START FIXED AGENT</button>
+        <button onclick="refreshData()" style="background: #2962ff;">🔄 REFRESH</button>
+        <button onclick="makeVideo()" style="background: #00c853;">🎬 MAKE VIDEO</button>
         
         <div class="logs" id="logs">Waiting...</div>
         <div id="video-section"><video id="v-player" controls height="450"></video></div>
         <div id="gallery"></div>
 
         <script>
-            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> INITIALIZING FLOW..."); }
+            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> STARTING..."); }
             function refreshData() {
                 fetch('/status').then(r=>r.json()).then(d=>{
                     document.getElementById('logs').innerHTML = d.logs.map(l=>`<div>${l}</div>`).join('');
@@ -136,7 +135,7 @@ async def visual_tap(page, element, desc):
     except: pass
     return False
 
-# --- MAIN AGENT (FULL FLOW) ---
+# --- MAIN AGENT ---
 async def run_organic_agent():
     try:
         for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
@@ -145,8 +144,11 @@ async def run_organic_agent():
         log_msg(f"📱 Testing with HK Number: {current_number}")
 
         async with async_playwright() as p:
-            # S23 Ultra Profile (Android 13)
-            pixel_5 = p.devices['Pixel 5'] # Using Pixel 5 template but modifying UA
+            # --- FIX: MODIFY DEVICE DICT BEFORE PASSING ---
+            pixel_5 = p.devices['Pixel 5'].copy() # Copy original settings
+            
+            # Override User Agent in the dictionary itself
+            pixel_5['user_agent'] = "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.101 Mobile Safari/537.36"
             
             browser = await p.chromium.launch(
                 headless=True,
@@ -154,9 +156,9 @@ async def run_organic_agent():
                 proxy=PROXY_CONFIG
             )
 
+            # Now pass unpacked dict (no duplicate user_agent arg)
             context = await browser.new_context(
                 **pixel_5,
-                user_agent="Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.101 Mobile Safari/537.36",
                 locale="en-US"
             )
             
@@ -176,7 +178,6 @@ async def run_organic_agent():
             await page.screenshot(path=f"{CAPTURE_DIR}/01_landing.jpg")
 
             # --- STEP 1.5: CLICK REGISTER ---
-            # Finding Register Link/Button
             reg_btn = page.get_by_text("Register", exact=True).first
             if await reg_btn.count() == 0: reg_btn = page.get_by_role("button", name="Register").first
             
@@ -185,19 +186,16 @@ async def run_organic_agent():
                 await asyncio.sleep(4)
                 await page.screenshot(path=f"{CAPTURE_DIR}/02_register_clicked.jpg")
             else:
-                log_msg("⚠️ Register button not found directly, maybe already on register page?")
+                log_msg("⚠️ Check: Maybe directly on register page?")
 
-            # --- STEP 2: AGREE TO TERMS (Tick & Next) ---
-            # Default Country is HK (We don't change)
-            
-            # Find the Checkbox Text to click
-            # Usually text is "Huawei ID User Agreement"
+            # --- STEP 2: AGREE TO TERMS ---
+            # Click Text to tick
             agreement_text = page.get_by_text("Huawei ID User Agreement").first
             if await agreement_text.count() > 0:
-                await visual_tap(page, agreement_text, "User Agreement Text (To Tick)")
+                await visual_tap(page, agreement_text, "Agreement Checkbox")
                 await asyncio.sleep(1)
             
-            # Click AGREE / NEXT
+            # Click Agree/Next
             agree_btn = page.get_by_text("Agree", exact=True).first
             if await agree_btn.count() == 0: agree_btn = page.get_by_text("Next", exact=True).first
             
@@ -208,32 +206,26 @@ async def run_organic_agent():
             else:
                 log_msg("❌ Agree Button Not Found")
 
-            # --- STEP 3: DATE OF BIRTH (< 2000) ---
+            # --- STEP 3: DATE OF BIRTH ---
             log_msg("📅 Handling DOB...")
             
-            # Try to find the Year column and scroll it
-            # This is tricky on mobile web, but let's try a swipe gesture in the middle of screen
-            # Assuming DOB picker is visible
-            
-            # Swipe Down 3 times to change year from 2024 -> 2000s
+            # SWIPE DOWN GESTURE (To change year)
             for _ in range(3):
-                # Start from middle-bottom and swipe down (pulling numbers down = going back in years?)
-                # Actually dragging down usually scrolls UP the list (Previous years).
                 await page.mouse.move(200, 500)
                 await page.mouse.down()
-                await page.mouse.move(200, 700, steps=10) # Drag down
+                await page.mouse.move(200, 700, steps=10) # Pull down
                 await page.mouse.up()
                 await asyncio.sleep(0.5)
 
             await page.screenshot(path=f"{CAPTURE_DIR}/04_dob_scrolled.jpg")
             
-            # Click NEXT on DOB
+            # Click Next
             dob_next = page.get_by_text("Next", exact=True).first
             if await dob_next.count() > 0:
                 await visual_tap(page, dob_next, "DOB Next")
                 await asyncio.sleep(4)
             
-            # --- STEP 4: USE PHONE NUMBER ---
+            # --- STEP 4: USE PHONE ---
             use_phone = page.get_by_text("Use phone number", exact=False).first
             if await use_phone.count() > 0:
                 await visual_tap(page, use_phone, "Use Phone Option")
@@ -241,14 +233,13 @@ async def run_organic_agent():
 
             await page.screenshot(path=f"{CAPTURE_DIR}/05_phone_input_screen.jpg")
 
-            # --- STEP 5: INPUT HK NUMBER & GET CODE ---
+            # --- STEP 5: INPUT & GET CODE ---
             inp = page.locator("input[type='tel']").first
             if await inp.count() == 0: inp = page.locator("input").first
             
             if await inp.count() > 0:
                 await visual_tap(page, inp, "Phone Input")
                 
-                # Type HK Number
                 for char in current_number:
                     await page.keyboard.type(char)
                     await asyncio.sleep(0.2)
@@ -262,17 +253,16 @@ async def run_organic_agent():
                 if await get_code.count() > 0:
                     await visual_tap(page, get_code, "GET CODE BUTTON")
                     log_msg("⏳ Waiting 10s for result...")
-                    await asyncio.sleep(10) # Wait to see if error or captcha
+                    await asyncio.sleep(10)
                     
                     await page.screenshot(path=f"{CAPTURE_DIR}/06_final_result.jpg")
                     
-                    # Final Check
                     if len(page.frames) > 1:
                         log_msg("🎉 BINGO! CAPTCHA DETECTED!")
                     elif await page.get_by_text("Unexpected problem").count() > 0:
                         log_msg("🛑 Error Popup Detected")
                     else:
-                        log_msg("❓ No obvious popup, check video")
+                        log_msg("❓ No popup? Check screenshot.")
                 else:
                     log_msg("❌ Get Code button not found")
             else:
