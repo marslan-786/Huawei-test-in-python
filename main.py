@@ -39,7 +39,7 @@ collection = db.captcha_dataset
 TOTAL_ATTEMPTS = 0
 CAPTCHAS_FOUND = 0
 MINING_ACTIVE = False
-LIVE_VIEW_ACTIVE = False # CCTV Mode Flag
+LIVE_VIEW_ACTIVE = False 
 
 logs = []
 def log_msg(message):
@@ -60,48 +60,35 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei CCTV Miner</title>
+        <title>Huawei Turtle Miner</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
             body { background: #000; color: #00e676; font-family: monospace; padding: 20px; text-align: center; }
-            
-            /* STATS */
             .stats-container { display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
             .card { background: #111; padding: 15px; border-radius: 8px; width: 140px; border: 1px solid #333; }
             .card h3 { margin: 0; font-size: 11px; color: #aaa; text-transform: uppercase; }
             .card h1 { margin: 5px 0 0 0; font-size: 28px; color: #fff; }
             .c-blue { color: #2979ff !important; } .c-gold { color: #ffd740 !important; }
-
-            /* BUTTONS */
             .btn { padding: 12px 20px; font-weight: bold; cursor: pointer; border:none; border-radius: 4px; font-size: 14px; margin: 5px; transition: 0.2s; width: 200px; }
-            .btn:hover { opacity: 0.8; }
             .btn-start { background: #00c853; color: black; }
             .btn-stop { background: #d50000; color: white; }
             .btn-live-on { background: #ff3d00; color: white; animation: pulse 2s infinite; }
             .btn-live-off { background: #37474f; color: #90a4ae; }
-
             @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255, 61, 0, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(255, 61, 0, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 61, 0, 0); } }
-
-            /* LOGS */
             .logs { height: 250px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #0a0a0a; margin: 15px auto; width: 95%; font-size: 12px; color: #cfd8dc; font-family: 'Courier New', monospace; }
             .log-entry { padding: 2px 0; border-bottom: 1px solid #1a1a1a; }
-
-            /* LIVE VIEW */
             .live-container { margin-top: 20px; border: 2px solid #333; padding: 10px; display: none; background: #111; }
             .live-img { width: 100%; max-width: 350px; border: 2px solid #ff3d00; border-radius: 5px; }
             .live-badge { color: #ff3d00; font-weight: bold; margin-bottom: 5px; display: block; }
-
         </style>
     </head>
     <body>
-        <h2>🕵️ HUAWEI CCTV MINER</h2>
-
+        <h2>🐢 SUPER TURTLE MINER</h2>
         <div class="stats-container">
             <div class="card"><h3>Attempts</h3><h1 id="s-attempts" class="c-blue">0</h1></div>
             <div class="card"><h3>Captchas</h3><h1 id="s-found" class="c-gold">0</h1></div>
             <div class="card"><h3>DB Saved</h3><h1 id="s-saved">0</h1></div>
         </div>
-
         <div>
             <button class="btn btn-start" onclick="fetch('/start', {method: 'POST'})">🚀 START BOT</button>
             <button class="btn btn-stop" onclick="fetch('/stop', {method: 'POST'})">🛑 STOP BOT</button>
@@ -109,49 +96,34 @@ async def dashboard():
         <div style="margin-top: 10px;">
             <button id="btn-live" class="btn btn-live-off" onclick="toggleLive()">🔴 START LIVE ACTIVITY</button>
         </div>
-
         <div id="live-box" class="live-container">
-            <span class="live-badge">● LIVE FEED (0.5s Delay)</span>
+            <span class="live-badge">● LIVE FEED (1s Update)</span>
             <img id="live-feed" src="" class="live-img" />
         </div>
-
         <div class="logs" id="logs">Waiting for logs...</div>
-
         <script>
             let liveActive = false;
-            
             function refreshStats() {
                 fetch('/status').then(r=>r.json()).then(d=>{
                     document.getElementById('logs').innerHTML = d.logs.map(l=>`<div class="log-entry">${l}</div>`).join('');
                     document.getElementById('s-attempts').innerText = d.stats.attempts;
                     document.getElementById('s-found').innerText = d.stats.found;
                     document.getElementById('s-saved').innerText = d.stats.saved_db;
-                    
-                    // Live View Refresh
-                    if(d.live_active && liveActive) {
-                        document.getElementById('live-feed').src = "/captures/live_monitor.jpg?t=" + new Date().getTime();
-                    }
+                    if(d.live_active && liveActive) document.getElementById('live-feed').src = "/captures/live_monitor.jpg?t=" + new Date().getTime();
                 });
             }
-
             function toggleLive() {
                 liveActive = !liveActive;
                 const btn = document.getElementById('btn-live');
                 const box = document.getElementById('live-box');
-                
                 if (liveActive) {
                     fetch('/live/start', {method: 'POST'});
-                    btn.className = "btn btn-live-on";
-                    btn.innerText = "⚫ STOP LIVE ACTIVITY";
-                    box.style.display = "block";
+                    btn.className = "btn btn-live-on"; btn.innerText = "⚫ STOP LIVE ACTIVITY"; box.style.display = "block";
                 } else {
                     fetch('/live/stop', {method: 'POST'});
-                    btn.className = "btn btn-live-off";
-                    btn.innerText = "🔴 START LIVE ACTIVITY";
-                    box.style.display = "none";
+                    btn.className = "btn btn-live-off"; btn.innerText = "🔴 START LIVE ACTIVITY"; box.style.display = "none";
                 }
             }
-
             setInterval(refreshStats, 2000);
         </script>
     </body>
@@ -162,7 +134,6 @@ async def dashboard():
 async def get_status():
     try: saved_count = await collection.count_documents({})
     except: saved_count = "Err"
-    
     return JSONResponse({
         "logs": logs,
         "stats": {"attempts": TOTAL_ATTEMPTS, "found": CAPTCHAS_FOUND, "saved_db": saved_count},
@@ -174,7 +145,7 @@ async def start_mining(bt: BackgroundTasks):
     global MINING_ACTIVE
     if not MINING_ACTIVE:
         MINING_ACTIVE = True
-        bt.add_task(run_transparent_loop)
+        bt.add_task(run_turtle_loop)
     return {"status": "started"}
 
 @app.post("/stop")
@@ -188,54 +159,52 @@ async def stop_mining():
 async def start_live():
     global LIVE_VIEW_ACTIVE
     LIVE_VIEW_ACTIVE = True
-    log_msg("🎥 LIVE MONITORING: ON")
     return {"status": "live_on"}
 
 @app.post("/live/stop")
 async def stop_live():
     global LIVE_VIEW_ACTIVE
     LIVE_VIEW_ACTIVE = False
-    log_msg("🎥 LIVE MONITORING: OFF")
     return {"status": "live_off"}
 
-# --- HELPER: LIVE UPDATE ---
-async def do_live_update(page, desc=""):
-    """Takes a screenshot only if Live View is active"""
+async def do_live_update(page):
     if LIVE_VIEW_ACTIVE:
-        try:
-            # Overwrite the same file to save space
-            await page.screenshot(path=f"{CAPTURE_DIR}/live_monitor.jpg")
+        try: await page.screenshot(path=f"{CAPTURE_DIR}/live_monitor.jpg")
         except: pass
 
-async def visual_tap(page, element, desc):
-    """Tries to tap and logs EXACT result"""
+# --- SMART CLICK FUNCTION ---
+async def smart_click(page, selector, desc, wait_time=5):
+    """Waits for element to appear, scrolls to it, and clicks."""
+    log_msg(f"🔍 Finding: {desc}...")
     try:
-        if await element.count() > 0:
-            # Check visibility
-            if await element.is_visible():
-                await element.scroll_into_view_if_needed()
-                box = await element.bounding_box()
-                if box:
-                    x = box['x'] + box['width'] / 2
-                    y = box['y'] + box['height'] / 2
-                    await page.touchscreen.tap(x, y)
-                    log_msg(f"✅ Clicked: {desc}")
-                    await do_live_update(page) # Update Live View
-                    return True
-            else:
-                log_msg(f"⚠️ Found {desc} but it's hidden.")
-        else:
-            log_msg(f"❌ Element NOT Found: {desc}")
+        # Wait up to 10 seconds for the element to appear in DOM
+        element = page.locator(selector).first
+        await element.wait_for(state="visible", timeout=10000)
+        
+        # Scroll & Click
+        await element.scroll_into_view_if_needed()
+        box = await element.bounding_box()
+        if box:
+            x = box['x'] + box['width'] / 2
+            y = box['y'] + box['height'] / 2
+            await page.touchscreen.tap(x, y)
+            log_msg(f"✅ CLICKED: {desc}")
+            await do_live_update(page)
+            
+            # TURTLE DELAY (Wait after every success)
+            log_msg(f"⏳ Waiting {wait_time}s (Turtle Mode)...")
+            await asyncio.sleep(wait_time) 
+            return True
+            
     except Exception as e:
-        log_msg(f"⚠️ Click Error {desc}: {e}")
-    
-    await do_live_update(page)
+        log_msg(f"❌ NOT FOUND / CLICK FAILED: {desc}")
+        await do_live_update(page)
     return False
 
-# --- 🏃 TRANSPARENT MINING LOOP ---
-async def run_transparent_loop():
+# --- 🐢 TURTLE MINING LOOP ---
+async def run_turtle_loop():
     global MINING_ACTIVE, TOTAL_ATTEMPTS, CAPTCHAS_FOUND
-    log_msg("🔥 Mining Started in Transparent Mode...")
+    log_msg("🐢 TURTLE MINING STARTED (Slow & Steady)...")
 
     while MINING_ACTIVE:
         browser = None
@@ -257,110 +226,95 @@ async def run_transparent_loop():
                 )
                 page = await context.new_page()
                 
-                log_msg(f"🎬 CYCLE #{TOTAL_ATTEMPTS} STARTED")
-                await do_live_update(page)
+                log_msg(f"🎬 CYCLE #{TOTAL_ATTEMPTS} START")
                 
-                # 1. LOAD PAGE
-                log_msg(f"🌍 Loading Page... ({BASE_URL})")
+                # 1. LOAD PAGE (Super Wait)
+                log_msg(f"🌍 Loading Page...")
                 try:
-                    await page.goto(BASE_URL, timeout=60000)
+                    await page.goto(BASE_URL, timeout=90000, wait_until='domcontentloaded')
                 except:
-                    log_msg("❌ Page Load Timeout!")
+                    log_msg("❌ Network Timeout. Restarting...")
                     await browser.close()
                     continue
                 
-                await asyncio.sleep(4)
+                log_msg("⏳ Letting page settle (8s)...")
+                await asyncio.sleep(8) 
                 await do_live_update(page)
 
-                # 2. COOKIE
-                await visual_tap(page, page.get_by_text("Accept", exact=True).first, "Cookie Accept")
-                await asyncio.sleep(2)
+                # 2. COOKIE (Ignore errors if not found)
+                await smart_click(page, "text=Accept", "Cookie", wait_time=2)
 
-                # 3. REGISTER
-                log_msg("🔍 Looking for Register Button...")
-                reg_btn = page.get_by_role("button", name="Register").first
-                if not await visual_tap(page, reg_btn, "Register"):
-                     log_msg("⚠️ Register button missing? Retrying...")
-                await asyncio.sleep(5)
+                # 3. REGISTER (Critical Step)
+                # We try two selectors for Register
+                if not await smart_click(page, "button:has-text('Register')", "Register Button", wait_time=8):
+                    if not await smart_click(page, "text=Register", "Register Text", wait_time=8):
+                        log_msg("⚠️ Register button missing. Aborting cycle.")
+                        await browser.close()
+                        continue # Restart loop
 
                 # 4. TERMS
-                log_msg("🔍 Looking for Agree/Terms...")
-                agree_btn = page.get_by_text("Agree", exact=True).first
-                if await agree_btn.count() == 0: agree_btn = page.get_by_text("Next", exact=True).first
-                await visual_tap(page, agree_btn, "Agree Terms")
-                await asyncio.sleep(4)
+                if not await smart_click(page, "text=Agree", "Agree Button", wait_time=6):
+                     await smart_click(page, "text=Next", "Next Button", wait_time=6)
 
-                # 5. DOB
+                # 5. DOB (Scroll and Next)
                 if await page.get_by_text("Date of birth").count() > 0:
-                    log_msg("🖱️ Scrolling Date of Birth...")
+                    log_msg("🖱️ Scrolling DOB...")
                     await page.mouse.move(200, 600)
                     await page.mouse.down()
-                    await page.mouse.move(200, 750, steps=20)
+                    await page.mouse.move(200, 800, steps=50) # Very slow scroll
                     await page.mouse.up()
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)
                     await do_live_update(page)
                     
-                    next_dob = page.get_by_text("Next", exact=True).first
-                    await visual_tap(page, next_dob, "DOB Next")
-                    await asyncio.sleep(3)
+                    await smart_click(page, "text=Next", "DOB Next", wait_time=5)
 
                 # 6. PHONE OPTION
-                use_phone = page.get_by_text("Use phone number", exact=False).first
-                await visual_tap(page, use_phone, "Use Phone Option")
-                await asyncio.sleep(2)
+                await smart_click(page, "text=Use phone number", "Use Phone Option", wait_time=5)
 
-                # 7. COUNTRY
+                # 7. COUNTRY SWITCH
                 log_msg("🌍 Switching Country...")
-                hk = page.get_by_text("Hong Kong").first
-                if await hk.count() == 0: hk = page.get_by_text("Country/Region").first
-                
-                if await visual_tap(page, hk, "Country Selector"):
-                    await asyncio.sleep(2)
-                    search = page.locator("input").first
-                    await visual_tap(page, search, "Search Box")
+                # Try to click country selector
+                if await smart_click(page, "text=Hong Kong", "HK Selector", wait_time=5) or \
+                   await smart_click(page, "text=Country/Region", "Region Selector", wait_time=5):
                     
+                    # Search
+                    await smart_click(page, "input", "Search Box", wait_time=2)
                     log_msg("⌨️ Typing 'Russia'...")
-                    await page.keyboard.type("Russia", delay=100)
-                    await asyncio.sleep(2)
+                    await page.keyboard.type("Russia", delay=150) # Slow typing
+                    await asyncio.sleep(3)
                     await do_live_update(page)
                     
-                    rus = page.get_by_text("Russia", exact=False).first
-                    await visual_tap(page, rus, "Russia Option")
-                    await asyncio.sleep(3)
+                    await smart_click(page, "text=Russia", "Russia Option", wait_time=5)
 
-                # 8. INPUT
-                log_msg(f"⌨️ Entering Number: {target_number}")
-                inp = page.locator("input[type='tel']").first
-                if await inp.count() == 0: inp = page.locator("input").first
-                
-                if await visual_tap(page, inp, "Number Input"):
-                    await page.keyboard.type(target_number, delay=50)
+                # 8. INPUT NUMBER
+                log_msg(f"⌨️ Inputting Number...")
+                if await smart_click(page, "input[type='tel']", "Number Field", wait_time=2):
+                    await page.keyboard.type(target_number, delay=100)
                     await asyncio.sleep(1)
-                    await page.touchscreen.tap(350, 100) # Close kb
-                    await do_live_update(page)
+                    await page.touchscreen.tap(350, 100) # Hide keyboard
                     await asyncio.sleep(2)
+                    await do_live_update(page)
 
                     # 9. GET CODE
-                    get_code = page.locator(".get-code-btn").first
-                    if await get_code.count() == 0: get_code = page.get_by_text("Get code", exact=False).first
-                    
-                    if await visual_tap(page, get_code, "GET CODE Button"):
-                        log_msg("⏳ Waiting 15s for Captcha Popup...")
+                    if await smart_click(page, ".get-code-btn", "GET CODE", wait_time=2) or \
+                       await smart_click(page, "text=Get code", "GET CODE Text", wait_time=2):
                         
+                        log_msg("⏳ Waiting 20s for Captcha...")
+                        
+                        # Wait Loop for Captcha
                         captcha_frame = None
-                        for i in range(15):
+                        for i in range(20):
                             for frame in page.frames:
                                 if await frame.get_by_text("swap 2 tiles", exact=False).count() > 0:
                                     captcha_frame = frame
                                     break
                             if captcha_frame: break
-                            
-                            if i % 2 == 0: await do_live_update(page) # Update live view while waiting
+                            if i % 3 == 0: await do_live_update(page)
                             await asyncio.sleep(1)
                         
                         if captcha_frame:
                             CAPTCHAS_FOUND += 1
-                            log_msg("🎉 CAPTCHA FOUND! Taking Snapshot...")
+                            log_msg("🎉 CAPTCHA FOUND!")
                             
                             # Clean Crop & Save
                             try:
@@ -395,13 +349,12 @@ async def run_transparent_loop():
                                 log_msg(f"⚠️ Save Error: {save_err}")
                         else:
                             log_msg("❌ No Captcha appeared.")
-                            await do_live_update(page)
 
         except Exception as e:
             log_msg(f"⚠️ CRASH: {str(e)[:50]}")
         
         finally:
             if browser:
-                log_msg("🛑 Closing Browser & Cooling Down (10s)...")
+                log_msg("💤 Cooling down (10s)...")
                 await browser.close()
                 await asyncio.sleep(10)
