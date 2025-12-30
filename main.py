@@ -3,22 +3,19 @@ import glob
 import asyncio
 import random
 import time
-import imageio
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from playwright.async_api import async_playwright
 
+# IMPORT SOLVER
 from captcha_solver import solve_captcha
 
 # --- CONFIGURATION ---
 CAPTURE_DIR = "./captures"
-VIDEO_PATH = f"{CAPTURE_DIR}/proof.mp4"
 NUMBERS_FILE = "numbers.txt"
 BASE_URL = "https://id5.cloud.huawei.com"
-
-# 👇 PROXY CONFIG (Webshare)
 PROXY_CONFIG = {
     "server": "http://p.webshare.io:80", 
     "username": "wwwsyxzg-rotate", 
@@ -58,7 +55,7 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Force Clicker</title>
+        <title>Huawei Grid Solver</title>
         <style>
             body { background: #111; color: #ffeb3b; font-family: monospace; padding: 20px; text-align: center; }
             button { padding: 10px 20px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #d50000; color: white; border-radius: 4px; }
@@ -68,9 +65,9 @@ async def dashboard():
         </style>
     </head>
     <body>
-        <h1>🔨 HUAWEI AGGRESSIVE CLICKER</h1>
-        <p>Double Tap Logic | Scroll to View | Burst Capture</p>
-        <button onclick="startBot()">🚀 START FORCE CLICK</button>
+        <h1>🧩 HUAWEI GRID SWAPPER</h1>
+        <p>Analyzing Grid 4x2 | Swapping Tile 0 <-> 4</p>
+        <button onclick="startBot()">🚀 START SOLVER BOT</button>
         <button onclick="refreshData()" style="background: #009688;">🔄 REFRESH</button>
         <div class="logs" id="logs">Waiting...</div>
         <h3>📸 LIVE FEED</h3>
@@ -103,10 +100,7 @@ async def start_bot(bt: BackgroundTasks):
 
 async def visual_tap(page, element, desc):
     try:
-        # First ensure it's in view
         await element.scroll_into_view_if_needed()
-        await asyncio.sleep(0.5)
-        
         box = await element.bounding_box()
         if box:
             x = box['x'] + box['width'] / 2
@@ -135,7 +129,6 @@ async def wait_and_capture(page, seconds, session_id, step_name):
 async def run_hk_flow():
     for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
     session_id = int(time.time())
-    
     current_number = get_next_number()
     if not current_number: current_number = generate_hk_number()
     
@@ -194,7 +187,7 @@ async def run_hk_flow():
             if await dob_next.count() > 0: await visual_tap(page, dob_next, "DOB Next")
             await wait_and_capture(page, 3, session_id, "04_dob_done")
 
-            # Phone Option
+            # Phone
             use_phone = page.get_by_text("Use phone number", exact=False).first
             if await use_phone.count() > 0: await visual_tap(page, use_phone, "Use Phone")
             await asyncio.sleep(2)
@@ -209,32 +202,33 @@ async def run_hk_flow():
                     await page.keyboard.type(char)
                     await asyncio.sleep(0.2)
                 
-                # --- NEW: CLOSE KEYBOARD FORCEFULLY ---
-                # Tapping outside or sending a dummy key
-                await page.touchscreen.tap(350, 100) 
+                await page.touchscreen.tap(350, 100) # Close Keyboard
                 await asyncio.sleep(1)
                 
-                # --- GET CODE LOGIC (WITH RETRY) ---
+                # GET CODE (Aggressive)
                 get_code = page.locator(".get-code-btn").first
                 if await get_code.count() == 0: get_code = page.get_by_text("Get code", exact=False).first
                 
                 if await get_code.count() > 0:
-                    # ATTEMPT 1
-                    await visual_tap(page, get_code, "GET CODE (Try 1)")
+                    await visual_tap(page, get_code, "GET CODE (1)")
                     await asyncio.sleep(2)
                     
-                    # CHECK IF CLICKED (Did captcha appear?)
                     if len(page.frames) == 1:
-                        log_msg("⚠️ First click didn't work. Retrying Force Click...")
-                        await visual_tap(page, get_code, "GET CODE (Try 2 - Force)")
+                        log_msg("⚠️ Retrying Force Click...")
+                        await visual_tap(page, get_code, "GET CODE (2)")
                     
                     log_msg("⏳ Waiting 10s for Captcha Load...")
                     await wait_and_capture(page, 10, session_id, "05_captcha_loading")
                     
+                    # --- CALL SOLVER IF LOADED ---
                     if len(page.frames) > 1:
-                        log_msg("🧩 CAPTCHA LOADED!")
+                        log_msg("🧩 CAPTCHA DETECTED! Running Grid Solver...")
+                        
+                        # Call the imported function
                         await solve_captcha(page, session_id)
-                        await wait_and_capture(page, 5, session_id, "06_post_solve")
+                        
+                        # Capture result after swap
+                        await wait_and_capture(page, 5, session_id, "07_post_swap")
                     else:
                         log_msg("❓ Still no Captcha. Screenshot saved.")
             

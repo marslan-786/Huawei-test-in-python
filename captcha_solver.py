@@ -3,70 +3,61 @@ import random
 import time
 import math
 
-# Grid Configuration for Huawei Swap Captcha (Usually 4x2)
+# Huawei Tile Swap is usually 4 Columns x 2 Rows
 ROWS = 2
 COLS = 4
 
 async def solve_captcha(page, session_id):
-    print("🧠 SOLVER: Analyzing Tile Swap Captcha...")
+    print("🧠 SOLVER: Initializing Grid System...")
     
-    # 1. FIND CAPTCHA CONTAINER
-    # Huawei swap captcha container class is usually different
+    # 1. FIND THE CAPTCHA FRAME
     frames = page.frames
     captcha_frame = None
     
+    # Frame dhoondo jisme image ho
     for frame in frames:
         try:
-            # Check for the specific swap container or image
             if await frame.locator(".uc-captcha-drag-area").count() > 0 or \
-               await frame.locator("img").count() > 3: # Swap captcha has multiple tile imgs
+               await frame.locator("canvas").count() > 0:
                 captcha_frame = frame
                 break
         except: continue
-        
-    # If standard logic fails, use the last frame (usually the popup)
-    if not captcha_frame and len(frames) > 1:
-        captcha_frame = frames[-1]
-
-    if not captcha_frame:
-        print("❌ Captcha Frame not found")
-        return False
-
-    print(f"✅ Captcha Frame Detected: {captcha_frame.url}")
     
-    # 2. LOCATE THE MAIN CAPTCHA BOX
-    # We need the bounding box of the whole image area to divide it
-    # Usually class: .uc-captcha-bg-img or similar container
+    # Fallback to main page if no frame found (Sometimes popup is on main page)
+    if not captcha_frame:
+        print("⚠️ Frame not found, trying main page context...")
+        captcha_frame = page
+
+    # 2. LOCATE CAPTCHA CONTAINER
+    # Try multiple selectors used by Huawei
     container = captcha_frame.locator(".uc-captcha-drag-area").first
     if await container.count() == 0:
-        # Fallback to a generic container if class changes
-        container = captcha_frame.locator("div").first 
-        
-    box = await container.bounding_box()
-    if not box:
-        print("❌ Could not get Captcha Box coordinates")
+        container = captcha_frame.locator("#captcha-container").first
+    
+    if await container.count() == 0:
+        print("❌ Captcha Container Not Found!")
         return False
 
-    print(f"📏 Captcha Size: {box['width']}x{box['height']}")
-    
-    # 3. CALCULATE GRID COORDINATES (The Matrix 4x2)
-    # Huawei Swap is typically 4 columns, 2 rows
+    # Get Coordinates
+    box = await container.bounding_box()
+    if not box:
+        print("❌ Box coordinates missing")
+        return False
+
+    print(f"📏 Captcha Found: {box['width']}x{box['height']}")
+
+    # 3. DRAW GRID (Visual Debugging)
     tile_width = box['width'] / COLS
     tile_height = box['height'] / ROWS
     
-    print(f"🔲 Calculating Grid: Each tile is {tile_width}x{tile_height}")
-
-    # Function to get center X,Y of a specific tile index (0-7)
     def get_tile_center(index):
         row = math.floor(index / COLS)
         col = index % COLS
-        
         x = box['x'] + (col * tile_width) + (tile_width / 2)
         y = box['y'] + (row * tile_height) + (tile_height / 2)
         return x, y
 
-    # --- 📸 DEBUG: DRAW GRID ON SCREENSHOT ---
-    # Hum har tile k center par ek DOT lagayenge taake screenshot me confirm ho
+    # Draw Yellow Dots on Screen
     for i in range(ROWS * COLS):
         tx, ty = get_tile_center(i)
         await page.evaluate(f"""
@@ -74,54 +65,50 @@ async def solve_captcha(page, session_id):
             dot.style.position = 'absolute';
             dot.style.left = '{tx}px';
             dot.style.top = '{ty}px';
-            dot.style.width = '15px';
-            dot.style.height = '15px';
+            dot.style.width = '20px';
+            dot.style.height = '20px';
             dot.style.backgroundColor = 'yellow';
             dot.style.color = 'black';
-            dot.style.fontSize = '10px';
             dot.style.fontWeight = 'bold';
-            dot.innerText = '{i}';
+            dot.style.textAlign = 'center';
             dot.style.borderRadius = '50%';
             dot.style.zIndex = '999999';
-            dot.style.textAlign = 'center';
+            dot.innerText = '{i}';
             document.body.appendChild(dot);
         """)
-    
-    # Take Screenshot with Grid Numbers
-    await asyncio.sleep(1)
-    await page.screenshot(path=f"./captures/{session_id}_GRID_ANALYSIS.jpg")
-    print(f"📸 Grid Analysis Saved: {session_id}_GRID_ANALYSIS.jpg")
 
-    # --- 4. THE AI LOGIC (PLACEHOLDER) ---
-    # Yahan AI (YesCaptcha/2Captcha) humein bataye gi k kin 2 tiles ko swap karna hai.
-    # Filhal hum TEST k liye 'Tile 0' (First) aur 'Tile 7' (Last) ko swap karte hain.
-    # (Ya jo bhi do tiles alag rang ki hon, unhein AI detect karegi)
+    # Screenshot with Grid
+    await asyncio.sleep(1)
+    await page.screenshot(path=f"./captures/{session_id}_06_GRID_READY.jpg")
+    print("📸 Grid Screenshot Saved!")
+
+    # 4. EXECUTE TEST SWAP (Tile 0 <-> Tile 4)
+    # Ye hum check karne k liye kar rahay hain k drag kaam kar raha hai ya nahi
+    source_idx = 0 # Top-Left
+    target_idx = 4 # Bottom-Left
     
-    source_tile_index = 0  # Example: Top-Left
-    target_tile_index = 4  # Example: Bottom-Left (Just testing logic)
+    sx, sy = get_tile_center(source_idx)
+    tx, ty = get_tile_center(target_idx)
     
-    # --- 5. PERFORM SWAP ACTION ---
-    print(f"🔄 Swapping Tile {source_tile_index} with Tile {target_tile_index}...")
+    print(f"🔄 SWAPPING Tile {source_idx} -> Tile {target_idx}")
     
-    sx, sy = get_tile_center(source_tile_index)
-    tx, ty = get_tile_center(target_tile_index)
-    
-    # MOVE TO SOURCE
+    # MOUSE ACTION
+    # 1. Move to Source
     await page.mouse.move(sx, sy, steps=5)
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(0.5)
     
-    # MOUSE DOWN (GRAB)
+    # 2. Grab (Down)
     await page.mouse.down()
     await asyncio.sleep(0.5)
     
-    # DRAG TO TARGET
-    await page.mouse.move(tx, ty, steps=15) # Smooth drag
+    # 3. Drag to Target (Slowly)
+    await page.mouse.move(tx, ty, steps=20) 
     await asyncio.sleep(0.5)
     
-    # MOUSE UP (DROP)
+    # 4. Drop (Up)
     await page.mouse.up()
     
-    print("✅ Swap Action Complete!")
+    print("✅ Swap Done! Waiting for result...")
     await asyncio.sleep(3)
     
     return True
