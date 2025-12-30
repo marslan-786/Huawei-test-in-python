@@ -1,71 +1,92 @@
 import asyncio
 import math
 import random
+import numpy as np
+from scipy import interpolate
+import pytweening
 
-# Grid Configuration (4x2)
+# Grid Configuration
 ROWS = 2
 COLS = 4
 
-# --- 🧠 BEZIER CURVE MATH (HUMAN MOVEMENT) ---
-def get_bezier_point(t, p0, p1, p2, p3):
-    """Calculates position at time t (0 to 1) on a cubic bezier curve"""
-    cX = 3 * (p1['x'] - p0['x'])
-    bX = 3 * (p2['x'] - p1['x']) - cX
-    aX = p3['x'] - p0['x'] - cX - bX
+# --- 🧠 PROFESSIONAL PHYSICS MOVEMENT ENGINE ---
+async def human_like_mouse_move(page, start_x, start_y, end_x, end_y):
+    print(f"🤖 PHYSICS ENGINE: Calculating path from ({int(start_x)},{int(start_y)}) to ({int(end_x)},{int(end_y)})...")
 
-    cY = 3 * (p1['y'] - p0['y'])
-    bY = 3 * (p2['y'] - p1['y']) - cY
-    aY = p3['y'] - p0['y'] - cY - bY
-
-    x = (aX * t**3) + (bX * t**2) + (cX * t) + p0['x']
-    y = (aY * t**3) + (bY * t**2) + (cY * t) + p0['y']
-    return {'x': x, 'y': y}
-
-async def human_drag(page, start_x, start_y, end_x, end_y):
-    """Moves mouse from A to B using a random Bezier curve path"""
-    print(f"🎨 Generating Human Path: ({int(start_x)},{int(start_y)}) -> ({int(end_x)},{int(end_y)})")
+    # 1. PATH GENERATION (SCIPY)
+    # Hum seedha rasta nahi lenge, balkay beech me 2-3 random points banayenge (Noise)
+    points = [[start_x, start_y]]
     
-    # 1. Create Control Points for the Curve (Randomness)
-    # P0 = Start, P3 = End
-    # P1 & P2 are random points in between to create a curve
-    p0 = {'x': start_x, 'y': start_y}
-    p3 = {'x': end_x, 'y': end_y}
-    
-    # Random deviation
-    offset = random.randint(50, 150)
-    p1 = {'x': start_x + random.randint(-offset, offset), 'y': start_y + random.randint(-offset, offset)}
-    p2 = {'x': end_x + random.randint(-offset, offset), 'y': end_y + random.randint(-offset, offset)}
+    # Add random control points in between to create a natural arc
+    dist = math.hypot(end_x - start_x, end_y - start_y)
+    control_points = 3
+    for i in range(control_points):
+        # Randomness based on distance
+        r_x = random.randint(-50, 50)
+        r_y = random.randint(-50, 50)
+        
+        # Linear interpolation point + noise
+        t = (i + 1) / (control_points + 1)
+        pt_x = start_x + (end_x - start_x) * t + r_x
+        pt_y = start_y + (end_y - start_y) * t + r_y
+        points.append([pt_x, pt_y])
+        
+    points.append([end_x, end_y])
+    points = np.array(points)
 
-    # 2. Move Mouse along the curve
-    steps = 25 # Total steps for drag
+    # Scipy Interpolation (Smooth Curve creation)
+    # B-Spline curve fit
+    tck, u = interpolate.splprep(points.T, s=0, k=2) # k=2 means quadratic curve
     
+    # Generate 50 smooth steps along this curve
+    steps = 50
+    u_new = np.linspace(0, 1, steps)
+    x_smooth, y_smooth = interpolate.splev(u_new, tck)
+
+    # 2. MOVEMENT EXECUTION (PYTWEENING)
+    # Move to start
     await page.mouse.move(start_x, start_y)
-    await page.mouse.down()
-    print("✊ Grabbing...")
     await asyncio.sleep(0.2)
+    
+    print("✊ GRABBING (Physics Based)...")
+    await page.mouse.down()
+    await asyncio.sleep(random.uniform(0.3, 0.6)) # Human pause
 
-    for i in range(steps + 1):
-        t = i / steps
-        point = get_bezier_point(t, p0, p1, p2, p3)
-        await page.mouse.move(point['x'], point['y'])
-        # Variable speed (slow start, fast middle, slow end)
-        sleep_time = random.uniform(0.01, 0.03)
-        await asyncio.sleep(sleep_time)
+    # Execute the calculated path with Variable Speed (Easing)
+    for i in range(steps):
+        target_x = x_smooth[i]
+        target_y = y_smooth[i]
+        
+        # Easing Logic: EaseInOutCubic (Slow Start -> Fast Middle -> Slow End)
+        # This breaks linear speed detection
+        progress = i / steps
+        ease_factor = pytweening.easeInOutCubic(progress)
+        
+        # Thora sa random delay har step par (Micro-stutter)
+        micro_sleep = random.uniform(0.005, 0.02) 
+        
+        await page.mouse.move(target_x, target_y)
+        await asyncio.sleep(micro_sleep)
 
-    # 3. Overshoot (Go slightly past target and come back)
-    await page.mouse.move(end_x + 5, end_y + 5, steps=5)
+    # 3. OVERSHOOT & CORRECTION (Human behavior)
+    # Target par puhanch kar thora agay nikal jana aur wapis ana
+    overshoot_x = end_x + random.choice([-3, 3])
+    overshoot_y = end_y + random.choice([-3, 3])
+    
+    await page.mouse.move(overshoot_x, overshoot_y, steps=5)
     await asyncio.sleep(0.1)
     await page.mouse.move(end_x, end_y, steps=5)
-    
-    print("✋ Releasing...")
+
+    await asyncio.sleep(random.uniform(0.4, 0.8)) # Hold at target
+    print("✋ RELEASING...")
     await page.mouse.up()
 
 
 # --- MAIN SOLVER ---
 async def solve_captcha(page, session_id):
-    print("🧠 SOLVER: Using Bezier Curve Logic...")
+    print("🧠 SOLVER: Initializing Enterprise-Grade Solver...")
     
-    # 1. FIND FRAME (Using your text sandwich logic)
+    # 1. FIND FRAME (Text Sandwich Logic)
     frames = page.frames
     captcha_frame = None
     for frame in frames:
@@ -76,7 +97,9 @@ async def solve_captcha(page, session_id):
         except: continue
     
     if not captcha_frame and len(frames) > 1: captcha_frame = frames[-1]
-    if not captcha_frame: return False
+    if not captcha_frame:
+        print("❌ Captcha Frame Not Found")
+        return False
 
     # 2. BOUNDARIES
     header = captcha_frame.get_by_text("Please complete verification", exact=False).first
@@ -112,17 +135,11 @@ async def solve_captcha(page, session_id):
     sx, sy = get_tile_center(0)
     tx, ty = get_tile_center(7)
 
-    # 5. EXECUTE HUMAN DRAG (USING PAGE MOUSE)
-    # We use 'page.mouse' because frames can be tricky with coordinates.
-    # But first we need to ensure we are clicking in the right place relative to viewport.
-    # Usually playwright handles frame offset automatically if we use frame.mouse.
-    
-    # Let's try `captcha_frame.mouse` FIRST with the new algorithm
+    # 5. EXECUTE PHYSICS DRAG
     try:
-        await human_drag(captcha_frame, sx, sy, tx, ty)
+        # Using Page Mouse (Global) with Logic
+        await human_like_mouse_move(page, sx, sy, tx, ty)
         return True
     except Exception as e:
-        print(f"⚠️ Frame drag failed ({e}), trying Page drag...")
-        # If frame mouse fails, try global page mouse (might need offset calculation)
-        await human_drag(page, sx, sy, tx, ty)
-        return True
+        print(f"❌ Drag Error: {e}")
+        return False
