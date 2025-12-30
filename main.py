@@ -2,7 +2,6 @@ import os
 import glob
 import asyncio
 import json
-import base64
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -14,79 +13,53 @@ from PIL import Image
 # --- CONFIGURATION ---
 TARGET_PHONE = "3177635849"
 CAPTURE_DIR = "./captures"
-# 👇 APNI KEY YAHAN PASTE KAREIN
 API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyCz-X24ZgEZ79YRcg8ym9ZtuQHup1AVgJQ")
 
 app = FastAPI()
-if not os.path.exists(CAPTURE_DIR):
-    os.makedirs(CAPTURE_DIR)
+if not os.path.exists(CAPTURE_DIR): os.makedirs(CAPTURE_DIR)
 app.mount("/captures", StaticFiles(directory=CAPTURE_DIR), name="captures")
 
 # --- LOGGING ---
 logs = []
 def log_msg(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
-    entry = f"[{timestamp}] {message}"
-    print(entry)
-    logs.insert(0, entry)
+    print(f"[{timestamp}] {message}")
+    logs.insert(0, f"[{timestamp}] {message}")
     if len(logs) > 50: logs.pop()
 
-# --- SMART MODEL SETUP ---
+# --- GEMINI SETUP ---
 active_model = None
-def configure_genai():
+def configure_model():
     global active_model
-    try:
-        genai.configure(api_key=API_KEY)
-        # Force use 1.5 Flash (Best for speed/vision)
-        active_model = genai.GenerativeModel("models/gemini-1.5-flash")
-        log_msg("✅ Model Configured: gemini-1.5-flash")
-    except Exception as e:
-        log_msg(f"❌ API Error: {e}")
+    genai.configure(api_key=API_KEY)
+    active_model = genai.GenerativeModel("models/gemini-1.5-flash")
 
-# --- DASHBOARD ---
+# --- DASHBOARD (UI) ---
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     return """
-    <!DOCTYPE html>
     <html>
     <head>
-        <title>Huawei Vision AI</title>
+        <meta http-equiv="refresh" content="5">
         <style>
-            body { background: #000; color: #00ff00; font-family: monospace; padding: 20px; text-align: center; }
-            .box { border: 1px solid #333; padding: 10px; margin: 10px auto; max-width: 900px; background: #111; }
-            button { padding: 15px 30px; font-weight: bold; cursor: pointer; border-radius: 5px; border:none; margin:5px;}
-            .btn-start { background: #ff4757; color: white; }
-            .btn-refresh { background: #2f3542; color: white; }
+            body { background: #000; color: #0f0; font-family: monospace; padding: 20px; text-align: center; }
+            .box { border: 1px solid #333; padding: 10px; margin: 10px auto; max-width: 800px; background: #111; }
             .logs { height: 300px; overflow-y: auto; text-align: left; border: 1px solid #444; padding: 10px; color: #ddd; }
-            .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
-            .gallery img { width: 100%; border: 2px solid #555; }
+            .gallery img { height: 150px; border: 1px solid #555; margin: 5px; }
         </style>
     </head>
     <body>
-        <h1>👁️ GEMINI VISION DIRECT (V2)</h1>
+        <h1>🧠 SELF-CORRECTING AI AGENT</h1>
         <div class="box">
-            <button class="btn-refresh" onclick="refresh()">🔄 REFRESH VIEW</button>
-            <button class="btn-start" onclick="startBot()">🚀 START VISION AI</button>
+            <button onclick="fetch('/start', {method:'POST'})" style="padding:10px;background:red;color:white;cursor:pointer;">🚀 START INTELLIGENT MODE</button>
         </div>
-        <div class="box logs" id="logs">System Standby...</div>
+        <div class="box logs" id="logs">Waiting...</div>
         <div class="box gallery" id="gallery"></div>
         <script>
-            function startBot() {
-                fetch('/start', {method: 'POST'});
-                document.getElementById('logs').innerHTML = "<div>>>> START COMMAND SENT...</div>" + document.getElementById('logs').innerHTML;
-                setTimeout(refresh, 2000);
-            }
-            function refresh() {
-                fetch('/status').then(r => r.json()).then(d => {
-                    let logHtml = "";
-                    d.logs.forEach(l => logHtml += `<div>${l}</div>`);
-                    document.getElementById('logs').innerHTML = logHtml;
-                    
-                    let galHtml = "";
-                    d.images.forEach(i => galHtml += `<a href="${i}" target="_blank"><img src="${i}"></a>`);
-                    document.getElementById('gallery').innerHTML = galHtml;
-                });
-            }
+            fetch('/status').then(r=>r.json()).then(d=>{
+                document.getElementById('logs').innerHTML = d.logs.map(l=>`<div>${l}</div>`).join('');
+                document.getElementById('gallery').innerHTML = d.images.map(i=>`<img src="${i}">`).join('');
+            });
         </script>
     </body>
     </html>
@@ -94,49 +67,59 @@ async def dashboard():
 
 @app.get("/status")
 async def get_status():
-    files = glob.glob(f'{CAPTURE_DIR}/*.jpg')
-    files.sort(key=os.path.getmtime, reverse=True)
+    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'), key=os.path.getmtime, reverse=True)
     urls = [f"/captures/{os.path.basename(f)}" for f in files]
     return JSONResponse({"logs": logs, "images": urls})
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    configure_genai()
-    if not active_model:
-        return {"status": "error", "msg": "No model found"}
-    log_msg(">>> Start Command Received")
-    bt.add_task(run_vision_agent)
+    configure_model()
+    log_msg(">>> COMMAND RECEIVED: Intelligent Mode")
+    bt.add_task(run_agent)
     return {"status": "started"}
 
-# --- AI BRAIN ---
-async def ask_gemini(image_path, element):
+# --- INTELLIGENT VISION FUNCTIONS ---
+
+async def ask_gemini(image_path, prompt):
+    """Generic function to talk to Gemini"""
     try:
-        log_msg(f"🧠 Asking AI to find: '{element}'")
         img = Image.open(image_path)
-        
-        # Strict Prompting
-        prompt = f"""
-        Look at this screenshot. I need to click the UI element described as: "{element}".
-        
-        Return valid JSON ONLY with 'x' and 'y' coordinates of the center.
-        If you are unsure, guess the most likely position.
-        Example: {{"x": 150, "y": 400}}
-        Do not write markdown or explanations.
-        """
-        
         response = active_model.generate_content([prompt, img])
-        text = response.text.replace("```json", "").replace("```", "").strip()
-        
-        data = json.loads(text)
-        log_msg(f"🎯 Coordinates found: {data}")
-        return data['x'], data['y']
+        return response.text.replace("```json", "").replace("```", "").strip()
     except Exception as e:
-        log_msg(f"⚠️ Vision Error: {e}")
+        log_msg(f"⚠️ Gemini Error: {e}")
+        return None
+
+async def get_coordinates(image_path, element):
+    """Finds X,Y for an element"""
+    prompt = f"""
+    Find the UI element: "{element}".
+    Return valid JSON ONLY with 'x' and 'y' (center).
+    Example: {{"x": 100, "y": 200}}
+    """
+    res = await ask_gemini(image_path, prompt)
+    try:
+        data = json.loads(res)
+        return data['x'], data['y']
+    except:
         return None, None
 
-# --- MAIN AUTOMATION ---
-async def run_vision_agent():
+async def verify_screen(image_path, verification_clue):
+    """Checks if a specific element is visible on screen"""
+    prompt = f"""
+    Look at this image. Do you see "{verification_clue}"?
+    Return valid JSON ONLY: {{"found": true}} or {{"found": false}}.
+    """
+    res = await ask_gemini(image_path, prompt)
     try:
+        return json.loads(res).get("found", False)
+    except:
+        return False
+
+# --- MAIN LOGIC ---
+async def run_agent():
+    try:
+        # Cleanup
         for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
 
         async with async_playwright() as p:
@@ -149,77 +132,95 @@ async def run_vision_agent():
             )
             page = await context.new_page()
 
-            log_msg("Navigating to Huawei...")
+            log_msg("Navigating...")
             await page.goto("https://id5.cloud.huawei.com/CAS/mobile/standard/register/wapRegister.html?reqClientType=7&loginChannel=7000000&regionCode=hk&loginUrl=https%3A%2F%2Fid5.cloud.huawei.com%2FCAS%2Fmobile%2Fstandard%2FwapLogin.html&lang=en-us&themeName=huawei#/wapRegister/regByPhone")
-            # Extra wait for full load
-            await asyncio.sleep(8) 
-            
-            # --- ACTION HELPER ---
-            async def ai_action(desc, step_id, input_text=None, wait_after=3):
-                path = f"{CAPTURE_DIR}/{step_id}_scan.jpg"
-                await page.screenshot(path=path)
+            await asyncio.sleep(6)
+
+            # --- SMART ACTION FUNCTION ---
+            async def smart_click_verify(target_desc, verification_clue, step_name):
+                log_msg(f"🔵 STEP: Clicking '{target_desc}'...")
                 
-                x, y = await ask_gemini(path, desc)
-                if x and y:
-                    # Draw Target
-                    await page.evaluate(f"""
-                        var d = document.createElement('div');
-                        d.style.position='absolute';d.style.left='{x-10}px';d.style.top='{y-10}px';
-                        d.style.width='20px';d.style.height='20px';d.style.background='red';
-                        d.style.borderRadius='50%';d.style.zIndex='99999';d.style.border='2px solid white';
-                        document.body.appendChild(d);
-                    """)
-                    await page.screenshot(path=f"{CAPTURE_DIR}/{step_id}_targeted.jpg")
+                # Try up to 3 times
+                for attempt in range(1, 4):
+                    # 1. Capture
+                    path = f"{CAPTURE_DIR}/{step_name}_try{attempt}.jpg"
+                    await page.screenshot(path=path)
                     
-                    await page.mouse.click(x, y)
-                    log_msg(f"Clicked at {x}, {y}")
+                    # 2. Locate
+                    x, y = await get_coordinates(path, target_desc)
                     
-                    # Agar input hai to thora ruk k type karo
-                    if input_text:
-                        await asyncio.sleep(1)
-                        # Ensure focus by clicking again if needed (optional)
-                        log_msg(f"Typing: {input_text}")
-                        await page.keyboard.type(input_text, delay=100)
-                    
-                    await asyncio.sleep(wait_after)
-                    return True
+                    if x and y:
+                        # Draw Red Dot
+                        await page.evaluate(f"""
+                            var d = document.createElement('div');
+                            d.style.position='absolute';d.style.left='{x-10}px';d.style.top='{y-10}px';
+                            d.style.width='20px';d.style.height='20px';d.style.background='red';
+                            d.style.borderRadius='50%';d.style.zIndex='99999';d.style.border='3px solid yellow';
+                            document.body.appendChild(d);
+                        """)
+                        await page.screenshot(path=f"{CAPTURE_DIR}/{step_name}_aim_{attempt}.jpg")
+                        
+                        # 3. Click
+                        await page.mouse.click(x, y)
+                        log_msg(f"   Clicking at {x},{y} (Attempt {attempt})")
+                        await asyncio.sleep(4) # Wait for UI to change
+                        
+                        # 4. Verify
+                        verify_path = f"{CAPTURE_DIR}/{step_name}_result_{attempt}.jpg"
+                        await page.screenshot(path=verify_path)
+                        
+                        success = await verify_screen(verify_path, verification_clue)
+                        if success:
+                            log_msg(f"✅ Success! Found '{verification_clue}'.")
+                            return True
+                        else:
+                            log_msg(f"⚠️ Verification Failed. Did not see '{verification_clue}'. Retrying...")
+                    else:
+                        log_msg("⚠️ Gemini couldn't find the element.")
+                
+                log_msg(f"❌ Failed to complete step: {step_name}")
                 return False
 
-            # --- STEP 1: OPEN DROPDOWN (Improved Target) ---
-            # Hum arrow (>) ko target karenge taake menu paka khule
-            await ai_action("The arrow icon > on the far right of the Country/Region row", "01_open_menu", wait_after=5)
-            
-            # --- STEP 2: CLICK SEARCH BAR (New Step) ---
-            # Type karne se pehle search bar par click karna zaroori hai mobile view main
-            await ai_action("The Search input field at the top of the list", "02_click_search", wait_after=1)
-            
-            # --- STEP 3: TYPE PAKISTAN ---
+            # --- EXECUTION ---
+
+            # Step 1: Open Country Menu
+            # Target: Arrow | Verify: "Search" input or list
+            if not await smart_click_verify(
+                "The small arrow icon > on the right side of the Country/Region row", 
+                "Search", 
+                "01_open_menu"
+            ): return
+
+            # Step 2: Search Pakistan
+            # Target: Search box | Verify: Keyboard or typed text
             log_msg("Typing 'Pakistan'...")
             await page.keyboard.type("Pakistan", delay=100)
-            await asyncio.sleep(3)
-            await page.screenshot(path=f"{CAPTURE_DIR}/03_searched.jpg")
+            await asyncio.sleep(2)
+            await page.screenshot(path=f"{CAPTURE_DIR}/02_typed.jpg")
+
+            # Step 3: Select Pakistan
+            # Target: Pakistan +92 | Verify: Main page with +92 code
+            if not await smart_click_verify(
+                "The text 'Pakistan +92' in the list", 
+                "+92", 
+                "03_select_pak"
+            ): return
+
+            # Step 4: Phone Number
+            log_msg("Typing Number...")
+            # Click Input first just in case
+            x, y = await get_coordinates(f"{CAPTURE_DIR}/03_select_pak_result_1.jpg", "Phone number input field")
+            if x: await page.mouse.click(x, y)
             
-            # --- STEP 4: SELECT PAKISTAN ---
-            # Ab Gemini ko Pakistan list main nazar ana chahiye
-            await ai_action("The text 'Pakistan +92' in the list", "04_select_pak", wait_after=5)
-            
-            # --- STEP 5: PHONE NUMBER ---
-            # Input field ko clear karke likhein
-            await ai_action("The Phone number input field", "05_click_phone")
-            log_msg(f"Typing Number: {TARGET_PHONE}")
             await page.keyboard.type(TARGET_PHONE, delay=100)
-            
-            # --- STEP 6: GET CODE ---
-            await ai_action("The small 'Get code' text button", "06_get_code")
+            await page.screenshot(path=f"{CAPTURE_DIR}/04_filled.jpg")
 
-            log_msg("Monitoring...")
-            for i in range(5):
-                await asyncio.sleep(3)
-                await page.screenshot(path=f"{CAPTURE_DIR}/monitor_{i}.jpg")
+            # Step 5: Get Code
+            # Target: Get code | Verify: Loading or OTP sent message
+            await smart_click_verify("The 'Get code' button", "sent", "05_get_code")
 
-            log_msg("✅ Sequence Complete.")
+            log_msg("✅ Workflow Finished.")
             await browser.close()
 
     except Exception as e:
         log_msg(f"❌ CRASH: {str(e)}")
-        print(e)
