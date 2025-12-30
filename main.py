@@ -7,13 +7,12 @@ from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async  # 🕵️ Stealth Mode
 
 # --- CONFIGURATION ---
 TARGET_PHONE = "3177635849"
 CAPTURE_DIR = "./captures"
 
-# Desktop URL (Mobile 'wap' hata diya hai)
+# Desktop URL
 MAGIC_URL = "https://id5.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html?service=https%3A%2F%2Foauth-login.cloud.huawei.com%2Foauth2%2Fv2%2Fauthorize%3Faccess_type%3Doffline&loginChannel=61000000&reqClientType=61&lang=en-us"
 
 app = FastAPI()
@@ -45,7 +44,7 @@ async def dashboard():
         </style>
     </head>
     <body>
-        <h1>🖱️ HUAWEI HUMAN CLICKER</h1>
+        <h1>🖱️ HUAWEI HUMAN CLICKER (Manual Stealth)</h1>
         <div class="box">
             <button onclick="startBot()">🚀 START HUMAN MODE</button>
             <button onclick="refreshData()" style="background: #4caf50; color: white;">🔄 REFRESH</button>
@@ -77,9 +76,25 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    log_msg(">>> COMMAND: Human Mode (Desktop + Stealth)")
+    log_msg(">>> COMMAND: Human Mode (Desktop)")
     bt.add_task(run_human_agent)
     return {"status": "started"}
+
+# --- MANUAL STEALTH (No Library Needed) ---
+async def apply_stealth(page):
+    # Ye script browser ko batata hai k "Main Robot nahi hun"
+    await page.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+        });
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [1, 2, 3, 4, 5]
+        });
+        window.navigator.chrome = {
+            runtime: {},
+            // etc.
+        };
+    """)
 
 # --- HUMAN MOVEMENT HELPER ---
 async def human_click(page, element):
@@ -91,21 +106,21 @@ async def human_click(page, element):
     start_x = box['x'] + (box['width'] / 2)
     start_y = box['y'] + (box['height'] / 2)
     
-    # Randomize exact click point (Insan bilkul beach main click nahi karta)
+    # Randomize exact click point
     target_x = start_x + random.uniform(-10, 10)
     target_y = start_y + random.uniform(-5, 5)
     
     # 2. Move Mouse (Hover)
     log_msg(f"🖱️ Moving mouse to {int(target_x)}, {int(target_y)}...")
-    await page.mouse.move(target_x, target_y, steps=15) # steps=15 means slow movement
-    await asyncio.sleep(random.uniform(0.2, 0.5)) # Pause before clicking
+    await page.mouse.move(target_x, target_y, steps=25) # Slower movement (25 steps)
+    await asyncio.sleep(random.uniform(0.3, 0.7)) # Pause before clicking
     
     # 3. Press Down
     log_msg("🖱️ Mouse Down...")
     await page.mouse.down()
     
     # 4. Wait (Human press duration)
-    await asyncio.sleep(random.uniform(0.05, 0.15))
+    await asyncio.sleep(random.uniform(0.1, 0.2))
     
     # 5. Release
     log_msg("🖱️ Mouse Up (Click Complete)")
@@ -119,78 +134,76 @@ async def run_human_agent():
         for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
 
         async with async_playwright() as p:
-            # DESKTOP SETUP (Not Mobile)
-            # stealth mode on karne k liye args
-            args = ["--disable-blink-features=AutomationControlled"]
+            # DESKTOP SETUP
+            # We hide automation flags manually via arguments
+            args = [
+                "--disable-blink-features=AutomationControlled",
+                "--start-maximized"
+            ]
             
             browser = await p.chromium.launch(headless=True, args=args)
             
-            # Standard Desktop Viewport (1920x1080)
+            # Standard Desktop Viewport
             context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
             
             page = await context.new_page()
-            # Activate Stealth (Hides 'navigator.webdriver')
-            await stealth_async(page)
+            
+            # Apply our Manual Stealth Script
+            await apply_stealth(page)
 
             log_msg("🚀 Loading Desktop Page...")
             await page.goto(MAGIC_URL)
             await asyncio.sleep(5)
             await page.screenshot(path=f"{CAPTURE_DIR}/01_loaded.jpg")
 
-            # --- STEP 1: CHANGE COUNTRY (Desktop has different layout) ---
-            # Desktop page shayad default China/Hong Kong ho, check karte hain
-            # Lekin pehle input dhoondte hain
-            
-            # Note: Desktop layout might be different. Let's look for Phone Input.
+            # --- STEP 1: FILL PHONE (DESKTOP) ---
             log_msg("🔍 Finding Phone Input...")
             
-            # Try specific desktop selectors
-            # Huawei desktop usually has a dropdown for country code
+            # Desktop strategy: Try finding generic input first
+            phone_input = page.locator("input[type='text']").first
             
-            # For now, let's assume direct input strategy first
-            phone_input = page.locator("input[type='text']").first # Desktop often uses text, not tel
-            
-            # Agar generic input na mile to specific class dhoondo
             if await phone_input.count() == 0:
+                 # Fallback
                  phone_input = page.locator(".huawei-input").first
 
             if await phone_input.count() > 0:
+                # Click to focus
                 await human_click(page, phone_input)
-                await page.keyboard.type(TARGET_PHONE, delay=random.randint(50, 150)) # Human typing speed
-                log_msg(f"⌨️ Typed {TARGET_PHONE}")
+                
+                # Human Typing
+                log_msg(f"⌨️ Typing {TARGET_PHONE}...")
+                await page.keyboard.type(TARGET_PHONE, delay=random.randint(60, 140))
+                
                 await asyncio.sleep(1)
                 await page.screenshot(path=f"{CAPTURE_DIR}/02_filled.jpg")
                 
-                # Blur out
-                await page.mouse.click(500, 500)
+                # Blur out by clicking empty space
+                await page.mouse.click(10, 10)
             else:
-                log_msg("❌ Phone input not found (Layout might be different on Desktop)")
-                # Let's take a screenshot to see what desktop view looks like
-                await page.screenshot(path=f"{CAPTURE_DIR}/debug_layout.jpg")
-                await browser.close()
+                log_msg("❌ Phone input not found!")
+                await page.screenshot(path=f"{CAPTURE_DIR}/debug_no_input.jpg")
                 return
 
             # --- STEP 2: GET CODE (HUMAN CLICK) ---
             log_msg("🔍 Looking for 'Get code'...")
             
-            # Desktop pe aksar button "Get Code" text nahi, balki "Obtain code" ya kuch aur hota hai
-            # Hum generic button dhoondenge jo 'code' contain kare
-            get_code_btn = page.locator("div, span, button").filter(has_text="Get code").last
+            # Text based locator is best
+            get_code_btn = page.get_by_text("Get code")
             
             if await get_code_btn.count() == 0:
-                 # Try variations
-                 get_code_btn = page.locator("div, span, button").filter(has_text="Code").last
+                 # Try capitalized
+                 get_code_btn = page.get_by_text("GET CODE")
             
             if await get_code_btn.count() > 0:
-                # Scroll into view
-                await get_code_btn.scroll_into_view_if_needed()
+                # Scroll carefully
+                await get_code_btn.first.scroll_into_view_if_needed()
                 await asyncio.sleep(1)
                 
-                # Highlight for screenshot
-                box = await get_code_btn.bounding_box()
+                # Highlight
+                box = await get_code_btn.first.bounding_box()
                 if box:
                     await page.evaluate(f"""
                         var d = document.createElement('div');
@@ -202,7 +215,7 @@ async def run_human_agent():
                     await page.screenshot(path=f"{CAPTURE_DIR}/03_target_found.jpg")
                 
                 log_msg("🖱️ Performing Human Click...")
-                await human_click(page, get_code_btn)
+                await human_click(page, get_code_btn.first)
                 log_msg("✅ Click Executed.")
             else:
                 log_msg("❌ 'Get Code' button not found!")
