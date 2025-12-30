@@ -12,14 +12,15 @@ from playwright.async_api import async_playwright
 # --- CONFIGURATION ---
 CAPTURE_DIR = "./captures"
 VIDEO_PATH = f"{CAPTURE_DIR}/proof.mp4"
+NUMBERS_FILE = "numbers.txt"
 
 # 🇺🇸 USA LINK
-MAGIC_URL = "https://id5.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html?regionCode=us&countryCode=us&lang=en-us"
+MAGIC_URL = "https://id5.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html?regionCode=ru&countryCode=ru&lang=en-us"
 
-# 👇 PROXY CONFIG 👇
+# 👇 ROTATING PROXY CONFIG (Webshare) 👇
 PROXY_CONFIG = {
-    "server": "http://142.111.48.253:7030", 
-    "username": "wwwsyxzg", 
+    "server": "http://p.webshare.io:80", 
+    "username": "wwwsyxzg-rotate", 
     "password": "582ygxexguhx"
 }
 
@@ -36,11 +37,31 @@ def log_msg(message):
     logs.insert(0, entry)
     if len(logs) > 100: logs.pop()
 
-# --- HELPER: GENERATE NUMBER ---
-def generate_california_number():
-    prefix = random.randint(200, 999)
-    suffix = random.randint(1000, 9999)
-    return f"310{prefix}{suffix}"
+# --- HELPER: READ NUMBERS FROM FILE ---
+def get_next_number():
+    if not os.path.exists(NUMBERS_FILE):
+        return None
+    
+    with open(NUMBERS_FILE, "r") as f:
+        lines = f.readlines()
+    
+    # Filter empty lines and strip whitespace
+    numbers = [line.strip() for line in lines if line.strip()]
+    
+    if not numbers:
+        return None
+        
+    # Get the first number
+    current_number = numbers[0]
+    
+    # Remove it from file (so we don't reuse it immediately) and append to end (rotation)
+    # OR you can just delete it. Here I am rotating the list.
+    new_lines = numbers[1:] + [current_number]
+    
+    with open(NUMBERS_FILE, "w") as f:
+        f.write("\n".join(new_lines))
+        
+    return current_number
 
 # --- DASHBOARD ---
 @app.get("/", response_class=HTMLResponse)
@@ -48,27 +69,28 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Slow-Mo Bot</title>
+        <title>Huawei Number File Bot</title>
         <style>
-            body { background: #0d1117; color: #58a6ff; font-family: monospace; padding: 20px; text-align: center; }
-            button { padding: 15px 30px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #238636; color: white; font-size: 16px; border-radius: 5px; }
-            .logs { height: 350px; overflow-y: auto; text-align: left; border: 1px solid #30363d; padding: 10px; color: #8b949e; background: #010409; margin-bottom: 20px; }
-            .gallery img { height: 110px; border: 1px solid #30363d; margin: 3px; border-radius: 4px; }
-            #video-section { display:none; margin-top:20px; border: 1px dashed #30363d; padding: 10px; }
+            body { background: #1a1a1a; color: #ff9800; font-family: monospace; padding: 20px; text-align: center; }
+            button { padding: 15px 30px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #d84315; color: white; font-size: 16px; border-radius: 5px; }
+            .logs { height: 350px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; color: #ccc; background: #000; margin-bottom: 20px; }
+            .gallery img { height: 110px; border: 1px solid #444; margin: 3px; border-radius: 4px; }
+            #video-section { display:none; margin-top:20px; border: 1px dashed #555; padding: 10px; }
         </style>
     </head>
     <body>
-        <h1>🐢 SLOW MOTION & VISUAL CLICK BOT</h1>
-        <button onclick="startBot()">🚀 START SLOW MODE</button>
-        <button onclick="refreshData()" style="background: #1f6feb;">🔄 REFRESH</button>
-        <button onclick="makeVideo()" style="background: #8957e5;">🎬 MAKE VIDEO</button>
+        <h1>📁 FILE-BASED NUMBER TESTER</h1>
+        <p style="color: #aaa;">Reading from: numbers.txt</p>
+        <button onclick="startBot()">🚀 START FILE PROCESSING</button>
+        <button onclick="refreshData()" style="background: #1565c0;">🔄 REFRESH</button>
+        <button onclick="makeVideo()" style="background: #2e7d32;">🎬 MAKE VIDEO</button>
         
         <div class="logs" id="logs">Waiting...</div>
         <div id="video-section"><video id="v-player" controls width="600"></video></div>
         <div id="gallery"></div>
 
         <script>
-            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> INITIALIZING SLOW MOTION..."); }
+            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> READING NUMBERS.TXT..."); }
             function refreshData() {
                 fetch('/status').then(r=>r.json()).then(d=>{
                     document.getElementById('logs').innerHTML = d.logs.map(l=>`<div>${l}</div>`).join('');
@@ -98,7 +120,7 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    bt.add_task(run_slow_agent)
+    bt.add_task(run_file_agent)
     return {"status": "started"}
 
 @app.post("/generate_video")
@@ -106,183 +128,162 @@ async def trigger_video():
     files = sorted(glob.glob(f'{CAPTURE_DIR}/monitor_*.jpg'))
     if not files: return {"status": "error"}
     try:
-        with imageio.get_writer(VIDEO_PATH, fps=1, format='FFMPEG') as writer: # 1 FPS for slow video
+        with imageio.get_writer(VIDEO_PATH, fps=1, format='FFMPEG') as writer:
             for filename in files: writer.append_data(imageio.imread(filename))
         return {"status": "done"}
     except: return {"status": "error"}
 
-# --- 🔴 VISUAL CLICK HELPER ---
+# --- VISUAL CLICK ---
 async def visual_click(page, element, desc):
     box = await element.bounding_box()
     if box:
         x = box['x'] + box['width'] / 2
         y = box['y'] + box['height'] / 2
         
-        # 1. Add RED DOT Marker
+        # Red Dot
         await page.evaluate(f"""
             var dot = document.createElement('div');
-            dot.style.position = 'absolute';
-            dot.style.left = '{x}px';
-            dot.style.top = '{y}px';
-            dot.style.width = '15px';
-            dot.style.height = '15px';
-            dot.style.backgroundColor = 'red';
-            dot.style.borderRadius = '50%';
-            dot.style.border = '2px solid yellow';
-            dot.style.zIndex = '99999';
-            dot.id = 'click-marker';
+            dot.style.position = 'absolute'; left = '{x}px'; top = '{y}px';
+            dot.style.width = '15px'; height = '15px'; background = 'red';
+            dot.style.borderRadius = '50%'; border = '2px solid yellow'; zIndex = '99999';
             document.body.appendChild(dot);
         """)
         
         log_msg(f"🖱️ Moving to {desc}...")
-        await page.mouse.move(x, y, steps=30) # Slow move
+        await page.mouse.move(x, y, steps=30)
         await asyncio.sleep(0.5)
         
         log_msg(f"🔴 CLICKING {desc}...")
         await page.mouse.down()
         await asyncio.sleep(0.2)
         await page.mouse.up()
-        
-        # Leave dot for a moment so screenshot captures it
         return True
     return False
 
-# --- 🐢 SLOW TYPING HELPER ---
+# --- SLOW TYPE ---
 async def slow_type(page, text):
-    log_msg(f"⌨️ Typing {text} slowly (5s)...")
+    log_msg(f"⌨️ Typing {text} slowly...")
     for char in text:
         await page.keyboard.type(char)
-        # 0.5 sec delay per char * 10 chars = 5 seconds
-        await asyncio.sleep(0.5) 
+        await asyncio.sleep(0.5) # Slow typing
     log_msg("✅ Typing Complete")
 
 # --- MAIN LOGIC ---
-async def run_slow_agent():
+async def run_file_agent():
     try:
         for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
         
-        current_number = generate_california_number()
-
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--disable-blink-features=AutomationControlled", "--start-maximized", "--no-sandbox"],
-                proxy=PROXY_CONFIG
-            )
-
-            context = await browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                timezone_id="America/Los_Angeles",
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-            )
-            page = await context.new_page()
+        while True: # Loop through numbers forever (or until file empty)
             
-            # Injection
-            await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
-
-            log_msg("🚀 1. Loading Website...")
-            try:
-                await page.goto(MAGIC_URL, timeout=60000)
-            except:
-                log_msg("❌ Network Error")
-                await browser.close()
+            # 1. GET NEW NUMBER FROM FILE
+            current_number = get_next_number()
+            if not current_number:
+                log_msg("❌ No numbers found in numbers.txt! Stopping.")
                 return
-
-            await page.wait_for_load_state("networkidle")
-            await asyncio.sleep(2)
-            await page.screenshot(path=f"{CAPTURE_DIR}/monitor_01_loaded.jpg")
-
-            # FIND INPUT
-            log_msg("🔍 Finding Input...")
-            inp = page.locator("input.huawei-input").first
-            if await inp.count() == 0: inp = page.locator("input[type='text']").first
             
-            if await inp.count() == 0:
-                log_msg("❌ Input Not Found")
-                await browser.close()
-                return
+            log_msg(f"📱 Processing Number: {current_number}")
 
-            # CLICK INPUT
-            await visual_click(page, inp, "Input Field")
-            await page.screenshot(path=f"{CAPTURE_DIR}/monitor_02_input_focused.jpg")
+            async with async_playwright() as p:
+                # 2. LAUNCH BROWSER (Rotating Proxy via Webshare)
+                # Webshare rotates IP on every new connection
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=["--disable-blink-features=AutomationControlled", "--start-maximized", "--no-sandbox"],
+                    proxy=PROXY_CONFIG
+                )
 
-            # --- 🐢 SLOW TYPING (5 Seconds) ---
-            await slow_type(page, current_number)
-            await page.screenshot(path=f"{CAPTURE_DIR}/monitor_03_typed.jpg")
-            await page.mouse.click(500, 500) # Blur
-            await asyncio.sleep(1)
+                context = await browser.new_context(
+                    viewport={"width": 1920, "height": 1080},
+                    timezone_id="America/Los_Angeles", # USA Timezone
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+                )
+                page = await context.new_page()
+                await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
 
-            # --- LOOP ---
-            retry_count = 0
-            max_retries = 50
-            
-            while retry_count < max_retries:
-                retry_count += 1
-                
-                # Number Rotation
-                if retry_count > 1 and retry_count % 2 != 0:
-                    log_msg("♻️ Changing Phone Number...")
-                    current_number = generate_california_number()
-                    await inp.click()
-                    await inp.fill("")
-                    await slow_type(page, current_number)
-                    await page.mouse.click(500, 500)
-
-                # 1. CLICK GET CODE
-                btn = page.locator(".get-code-btn").first
-                if await btn.count() == 0: btn = page.get_by_text("Get code").first
-                
-                if await btn.count() > 0:
-                    await page.screenshot(path=f"{CAPTURE_DIR}/monitor_loop_{retry_count}_A_before_click.jpg")
-                    await visual_click(page, btn, "Get Code Button")
-                    await page.screenshot(path=f"{CAPTURE_DIR}/monitor_loop_{retry_count}_B_after_click.jpg")
-                    
-                    # Wait 3 seconds to see result (As requested)
-                    log_msg("⏳ Waiting 3s for response...")
-                    await asyncio.sleep(3)
-                else:
-                    log_msg("❌ Button Lost!")
-                    break
-
-                # 2. CHECK RESULT
-                error_detected = False
-                await page.screenshot(path=f"{CAPTURE_DIR}/monitor_loop_{retry_count}_C_response.jpg")
-
-                # Check Captcha
-                if len(page.frames) > 1:
-                    log_msg("🎉 BINGO! CAPTCHA DETECTED!")
-                    await page.screenshot(path=f"{CAPTURE_DIR}/monitor_SUCCESS.jpg")
+                log_msg("🚀 Loading Website...")
+                try:
+                    await page.goto(MAGIC_URL, timeout=60000)
+                except:
+                    log_msg("❌ Network Error (Proxy Failed), Retrying...")
                     await browser.close()
-                    return
+                    continue
 
-                # Check Error
-                if await page.get_by_text("An unexpected problem").count() > 0:
-                    error_detected = True
+                await page.wait_for_load_state("networkidle")
+                await asyncio.sleep(2)
+                await page.screenshot(path=f"{CAPTURE_DIR}/monitor_01_loaded.jpg")
+
+                # FIND INPUT
+                inp = page.locator("input.huawei-input").first
+                if await inp.count() == 0: inp = page.locator("input[type='text']").first
                 
-                if error_detected:
-                    log_msg(f"🛑 Error Detected on Try {retry_count}")
-                    
-                    # Find OK
-                    ok_btn = page.locator("div.hwid-dialog-btn").filter(has_text="OK").first
-                    if await ok_btn.count() == 0: ok_btn = page.get_by_text("OK", exact=True).first
-                    
-                    if await ok_btn.count() > 0:
-                        await visual_click(page, ok_btn, "OK Button")
-                        await page.screenshot(path=f"{CAPTURE_DIR}/monitor_loop_{retry_count}_D_ok_clicked.jpg")
-                        
-                        # --- 10 SECOND COUNTDOWN ---
-                        log_msg("⏳ Cooldown started (10s)...")
-                        for s in range(10, 0, -1):
-                            log_msg(f"🕒 Waiting... {s}s")
-                            await asyncio.sleep(1)
-                    else:
-                        log_msg("⚠️ Error present but OK button missing")
-                        await asyncio.sleep(5)
-                else:
-                    log_msg("❓ No popup yet, retrying...")
+                if await inp.count() == 0:
+                    log_msg("❌ Input Not Found")
+                    await browser.close()
+                    continue # Try next number/proxy
 
-            log_msg("❌ Max retries reached.")
-            await browser.close()
+                # FILL NUMBER
+                await visual_click(page, inp, "Input Field")
+                await slow_type(page, current_number)
+                await page.mouse.click(500, 500) # Blur
+                await page.screenshot(path=f"{CAPTURE_DIR}/monitor_02_typed.jpg")
+                await asyncio.sleep(1)
+
+                # --- TRY CLICKING GET CODE (Max 2 attempts per number) ---
+                retry_count = 0
+                max_retries_per_number = 2 
+                number_failed = False
+
+                while retry_count < max_retries_per_number:
+                    retry_count += 1
+                    
+                    # Click Button
+                    btn = page.locator(".get-code-btn").first
+                    if await btn.count() == 0: btn = page.get_by_text("Get code").first
+                    
+                    if await btn.count() > 0:
+                        await visual_click(page, btn, "Get Code Button")
+                        log_msg("⏳ Waiting 3s for response...")
+                        await asyncio.sleep(3)
+                    else:
+                        log_msg("❌ Button Lost!")
+                        break
+
+                    # Check Result
+                    await page.screenshot(path=f"{CAPTURE_DIR}/monitor_response_{current_number}_{retry_count}.jpg")
+                    
+                    # 1. Success (Captcha)
+                    if len(page.frames) > 1:
+                        log_msg("🎉 BINGO! CAPTCHA DETECTED! Stopping.")
+                        await page.screenshot(path=f"{CAPTURE_DIR}/monitor_SUCCESS.jpg")
+                        await browser.close()
+                        return # STOP EVERYTHING
+
+                    # 2. Error Check
+                    if await page.get_by_text("An unexpected problem").count() > 0:
+                        log_msg(f"🛑 Error on Try {retry_count} for {current_number}")
+                        
+                        # Find OK
+                        ok_btn = page.locator("div.hwid-dialog-btn").filter(has_text="OK").first
+                        if await ok_btn.count() == 0: ok_btn = page.get_by_text("OK", exact=True).first
+                        
+                        if await ok_btn.count() > 0:
+                            await visual_click(page, ok_btn, "OK Button")
+                            
+                            # 10s Wait
+                            log_msg("⏳ Waiting 10s cooldown...")
+                            await asyncio.sleep(10)
+                        else:
+                            log_msg("⚠️ OK button missing")
+                            await asyncio.sleep(5)
+                    else:
+                        # No error, no captcha? Wait a bit more
+                        log_msg("❓ No popup, checking again...")
+                        await asyncio.sleep(2)
+                
+                # If loop finishes without success
+                log_msg(f"❌ Failed 2 times with {current_number}. Rotating to next number...")
+                await browser.close()
+                # Loop continues to next number in file
 
     except Exception as e:
-        log_msg(f"❌ Error: {str(e)}")
+        log_msg(f"❌ Critical Error: {str(e)}")
