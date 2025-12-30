@@ -2,6 +2,7 @@
 FROM python:3.11-bookworm
 
 # 1. Install System Dependencies (FFmpeg + Browsers Support)
+# FIX: 'librandr2' ki jagah 'libxrandr2' kar diya hai
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libnss3 \
@@ -14,7 +15,7 @@ RUN apt-get update && apt-get install -y \
     libxcomposite1 \
     libxdamage1 \
     libxfixes3 \
-    librandr2 \
+    libxrandr2 \
     libgbm1 \
     libasound2 \
     libpango-1.0-0 \
@@ -38,5 +39,4 @@ COPY . .
 RUN mkdir -p captures && chmod 777 captures
 
 # 6. RUN COMMAND (Railway Port Fix)
-# Ye command Railway k $PORT variable ko use karegi, agar wo na mila to 8080 use karegi.
 CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"
