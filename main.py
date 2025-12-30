@@ -14,14 +14,10 @@ from playwright.async_api import async_playwright
 CAPTURE_DIR = "./captures"
 VIDEO_PATH = f"{CAPTURE_DIR}/proof.mp4"
 NUMBERS_FILE = "numbers.txt"
-
-# 🌍 TARGET COUNTRY
 TARGET_COUNTRY = "Pakistan"
-
-# 🏁 STARTING URL
 BASE_URL = "https://id5.cloud.huawei.com"
 
-# 👇 ROTATING PROXY CONFIG (Webshare) 👇
+# 👇 PROXY CONFIG (Webshare)
 PROXY_CONFIG = {
     "server": "http://p.webshare.io:80", 
     "username": "wwwsyxzg-rotate", 
@@ -48,7 +44,7 @@ def get_next_number():
     numbers = [line.strip() for line in lines if line.strip()]
     if not numbers: return None
     current_number = numbers[0]
-    # Rotate
+    # Rotate to end
     new_lines = numbers[1:] + [current_number]
     with open(NUMBERS_FILE, "w") as f: f.write("\n".join(new_lines))
     return current_number
@@ -59,23 +55,22 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Country Selector</title>
+        <title>Huawei Invisible Bot</title>
         <style>
-            body { background: #121212; color: #00e676; font-family: monospace; padding: 20px; text-align: center; }
-            button { padding: 10px 20px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #6200ea; color: white; border-radius: 4px; }
-            .logs { height: 300px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #1e1e1e; margin-bottom: 20px; font-size: 13px; color: #e0e0e0; }
+            body { background: #000; color: #fff; font-family: monospace; padding: 20px; text-align: center; }
+            button { padding: 10px 20px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #d50000; color: white; border-radius: 4px; }
+            .logs { height: 300px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #111; margin-bottom: 20px; font-size: 13px; color: #bbb; }
             .gallery { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
-            .gallery img { height: 120px; border: 1px solid #555; border-radius: 5px; }
-            .gallery img:hover { transform: scale(1.5); border-color: #fff; z-index:10; position:relative; }
-            #video-section { display:none; margin-top:20px; border:1px solid #444; padding:10px; }
+            .gallery img { height: 100px; border: 1px solid #333; }
+            #video-section { display:none; margin-top:20px; }
         </style>
     </head>
     <body>
-        <h1>🇵🇰 HUAWEI COUNTRY SELECTOR BOT</h1>
-        <p>Target: Pakistan | Method: Search & Select</p>
-        <button onclick="startBot()">🚀 START BOT</button>
+        <h1>👻 HUAWEI INVISIBLE BOT</h1>
+        <p>No Visuals | Fail Fast Strategy | IP Rotation</p>
+        <button onclick="startBot()">🚀 START GHOST AGENT</button>
         <button onclick="refreshData()" style="background: #009688;">🔄 REFRESH</button>
-        <button onclick="makeVideo()" style="background: #e91e63;">🎬 MAKE VIDEO</button>
+        <button onclick="makeVideo()" style="background: #2962ff;">🎬 MAKE VIDEO</button>
         
         <div class="logs" id="logs">Waiting...</div>
         <div id="video-section"><video id="v-player" controls height="400"></video></div>
@@ -83,7 +78,7 @@ async def dashboard():
         <div class="gallery" id="gallery"></div>
 
         <script>
-            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> STARTING..."); }
+            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> STARTING GHOST MODE..."); }
             function refreshData() {
                 fetch('/status').then(r=>r.json()).then(d=>{
                     document.getElementById('logs').innerHTML = d.logs.map(l=>`<div>${l}</div>`).join('');
@@ -113,7 +108,7 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    bt.add_task(run_country_select_agent)
+    bt.add_task(run_ghost_agent)
     return {"status": "started"}
 
 @app.post("/generate_video")
@@ -126,38 +121,16 @@ async def trigger_video():
         return {"status": "done"}
     except: return {"status": "error"}
 
-# --- VISUAL TAP HELPER (WITH FORCE DOT) ---
-async def visual_tap(page, element, desc):
+# --- INVISIBLE TAP HELPER (No Red Dot) ---
+async def tap(page, element, desc):
     try:
         box = await element.bounding_box()
         if box:
             x = box['x'] + box['width'] / 2
             y = box['y'] + box['height'] / 2
             
-            # Create Red Dot
-            await page.evaluate(f"""
-                var dot = document.createElement('div');
-                dot.style.position = 'absolute'; 
-                dot.style.left = '{x}px'; 
-                dot.style.top = '{y}px';
-                dot.style.width = '30px'; 
-                dot.style.height = '30px'; 
-                dot.style.background = 'rgba(255, 0, 0, 0.9)'; /* RED */
-                dot.style.borderRadius = '50%'; 
-                dot.style.border = '3px solid white'; 
-                dot.style.zIndex = '999999';
-                dot.style.pointerEvents = 'none';
-                dot.id = 'temp-dot';
-                document.body.appendChild(dot);
-            """)
-            
-            log_msg(f"📍 Target: {desc}")
-            await asyncio.sleep(0.5) # Show dot
-            
-            log_msg(f"🔴 FORCE TAPPING {desc}...")
+            log_msg(f"👆 Tapping {desc}...")
             await page.touchscreen.tap(x, y)
-            
-            # Remove dot after tap (optional, keeping it shows history better in screenshots)
             return True
     except Exception as e:
         log_msg(f"⚠️ Tap Error: {e}")
@@ -169,164 +142,170 @@ async def wait_and_log(seconds):
     await asyncio.sleep(seconds)
 
 # --- MAIN AGENT ---
-async def run_country_select_agent():
-    session_id = int(time.time())
-    
-    # Use Next Number from File (Assuming Pakistani numbers now)
-    current_number = get_next_number()
-    if not current_number:
-        log_msg("❌ No numbers in numbers.txt!")
-        return
+async def run_ghost_agent():
+    # Loop continuously through numbers
+    while True:
+        session_id = int(time.time())
+        
+        # Get Next Number
+        current_number = get_next_number()
+        if not current_number:
+            log_msg("❌ No numbers in file!")
+            return
 
-    log_msg(f"🎬 Session {session_id} | Changing Region to: {TARGET_COUNTRY}")
+        log_msg(f"🎬 New Session {session_id} | Number: {current_number}")
+        log_msg("🔄 Connecting with NEW IP (Webshare Rotate)...")
 
-    async with async_playwright() as p:
-        pixel_5 = p.devices['Pixel 5'].copy()
-        pixel_5['user_agent'] = "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.101 Mobile Safari/537.36"
-        pixel_5['viewport'] = {'width': 412, 'height': 950} 
+        async with async_playwright() as p:
+            pixel_5 = p.devices['Pixel 5'].copy()
+            pixel_5['user_agent'] = "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.101 Mobile Safari/537.36"
+            pixel_5['viewport'] = {'width': 412, 'height': 950} 
 
-        browser = await p.chromium.launch(
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
-            proxy=PROXY_CONFIG
-        )
+            # Launch Browser (New IP on every launch)
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+                proxy=PROXY_CONFIG
+            )
 
-        context = await browser.new_context(**pixel_5, locale="en-US")
-        page = await context.new_page()
+            context = await browser.new_context(**pixel_5, locale="en-US")
+            page = await context.new_page()
 
-        try:
-            # STEP 1: LOAD MAIN PAGE
-            log_msg("🚀 Navigating...")
-            await page.goto(BASE_URL, timeout=90000)
-            await wait_and_log(4)
-            
-            # Close Cookie
-            cookie_close = page.locator(".cookie-close-btn").first
-            if await cookie_close.count() == 0: cookie_close = page.get_by_text("Accept", exact=True).first
-            if await cookie_close.count() > 0:
-                await visual_tap(page, cookie_close, "Cookie Accept")
-                await wait_and_log(2)
-
-            await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_01_loaded.jpg")
-
-            # STEP 2: REGISTER BUTTON
-            reg_btn = page.get_by_text("Register", exact=True).first
-            if await reg_btn.count() == 0: reg_btn = page.get_by_role("button", name="Register").first
-            
-            if await reg_btn.count() > 0:
-                await visual_tap(page, reg_btn, "Register Button")
-                await wait_and_log(5)
-            else:
-                log_msg("⚠️ Register button hidden")
-            
-            await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_02_register_page.jpg")
-
-            # --- 🔥 NEW: CHANGE COUNTRY TO PAKISTAN ---
-            log_msg("🌍 Checking for Hong Kong/Country Selector...")
-            
-            # Find the element that shows current country (Usually "Hong Kong (China)")
-            # Or the label "Country/Region" which is clickable
-            hk_selector = page.get_by_text("Hong Kong").first
-            if await hk_selector.count() == 0: hk_selector = page.get_by_text("Country/Region").first
-            
-            if await hk_selector.count() > 0:
-                await visual_tap(page, hk_selector, "Country Selector (HK)")
-                await wait_and_log(3)
-                await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_03_country_list.jpg")
-
-                # SEARCH
-                search_box = page.locator("input").first # Generic input is usually search here
-                if await search_box.count() > 0:
-                    await visual_tap(page, search_box, "Search Bar")
-                    log_msg(f"⌨️ Typing '{TARGET_COUNTRY}'...")
-                    await page.keyboard.type(TARGET_COUNTRY, delay=100)
-                    await wait_and_log(2)
-                    await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_04_search_typed.jpg")
-
-                    # SELECT FROM LIST
-                    target_country_opt = page.get_by_text(TARGET_COUNTRY, exact=True).first
-                    if await target_country_opt.count() > 0:
-                        await visual_tap(page, target_country_opt, f"Select {TARGET_COUNTRY}")
-                        await wait_and_log(3)
-                        log_msg(f"✅ Country Changed to {TARGET_COUNTRY}")
-                    else:
-                        log_msg("❌ Country not found in list")
-                else:
-                    log_msg("❌ Search bar not found")
-            else:
-                log_msg("⚠️ Could not find Country Selector")
-
-            await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_05_country_final.jpg")
-
-            # STEP 3: AGREE
-            agree_text = page.get_by_text("Huawei ID User Agreement").first
-            if await agree_text.count() > 0:
-                await visual_tap(page, agree_text, "Terms Checkbox")
-                await wait_and_log(1)
-
-            agree_btn = page.get_by_text("Agree", exact=True).first
-            if await agree_btn.count() == 0: agree_btn = page.get_by_text("Next", exact=True).first
-            
-            if await agree_btn.count() > 0:
-                await visual_tap(page, agree_btn, "Agree/Next")
+            try:
+                # STEP 1: LOAD MAIN PAGE
+                log_msg("🚀 Navigating...")
+                await page.goto(BASE_URL, timeout=60000)
                 await wait_and_log(4)
-
-            # STEP 4: DOB
-            log_msg("📅 Handling DOB...")
-            await page.mouse.move(200, 500)
-            await page.mouse.down()
-            await page.mouse.move(200, 800, steps=20)
-            await page.mouse.up()
-            await wait_and_log(2)
-            
-            dob_next = page.get_by_text("Next", exact=True).first
-            if await dob_next.count() > 0:
-                await visual_tap(page, dob_next, "DOB Next")
-                await wait_and_log(3)
-
-            # STEP 5: PHONE
-            use_phone = page.get_by_text("Use phone number", exact=False).first
-            if await use_phone.count() > 0:
-                await visual_tap(page, use_phone, "Use Phone Option")
-                await wait_and_log(2)
-
-            await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_06_input_screen.jpg")
-
-            # STEP 6: INPUT & CODE
-            inp = page.locator("input[type='tel']").first
-            if await inp.count() == 0: inp = page.locator("input").first
-            
-            if await inp.count() > 0:
-                await visual_tap(page, inp, "Input")
-                for char in current_number:
-                    await page.keyboard.type(char)
-                    await asyncio.sleep(0.3)
-                await page.touchscreen.tap(20, 100) # Blur
-                await wait_and_log(1)
                 
-                get_code = page.locator(".get-code-btn").first
-                if await get_code.count() == 0: get_code = page.get_by_text("Get code", exact=False).first
+                # Cookie Banner
+                cookie_close = page.locator(".cookie-close-btn").first
+                if await cookie_close.count() == 0: cookie_close = page.get_by_text("Accept", exact=True).first
+                if await cookie_close.count() > 0:
+                    await tap(page, cookie_close, "Cookie Accept")
+                    await wait_and_log(2)
+
+                await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_01_loaded.jpg")
+
+                # STEP 2: REGISTER BUTTON
+                reg_btn = page.get_by_text("Register", exact=True).first
+                if await reg_btn.count() == 0: reg_btn = page.get_by_role("button", name="Register").first
                 
-                if await get_code.count() > 0:
-                    await visual_tap(page, get_code, "GET CODE")
-                    log_msg("⏳ Waiting 15s for CAPTCHA...")
-                    await asyncio.sleep(15)
-                    
-                    await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_07_result.jpg")
-                    
-                    if len(page.frames) > 1 or await page.locator("iframe").count() > 0:
-                         log_msg("🎉 BINGO! CAPTCHA DETECTED! (Mission Success)")
-                         await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_SUCCESS.jpg")
-                    else:
-                         log_msg("ℹ️ Check screenshot for result")
+                if await reg_btn.count() > 0:
+                    await tap(page, reg_btn, "Register Button")
+                    await wait_and_log(5)
                 else:
-                    log_msg("❌ Get Code Missing")
-            else:
-                log_msg("❌ Input Missing")
+                    log_msg("⚠️ Register button hidden")
+                
+                await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_02_register_page.jpg")
 
-            await browser.close()
+                # --- STEP 3: CHANGE COUNTRY (Hong Kong -> Pakistan) ---
+                hk_selector = page.get_by_text("Hong Kong").first
+                if await hk_selector.count() == 0: hk_selector = page.get_by_text("Country/Region").first
+                
+                if await hk_selector.count() > 0:
+                    await tap(page, hk_selector, "Country Selector")
+                    await wait_and_log(3)
 
-        except Exception as e:
-            log_msg(f"❌ Error: {str(e)}")
-            await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_ERROR.jpg")
-            await browser.close()
+                    # Search
+                    search_box = page.locator("input").first
+                    if await search_box.count() > 0:
+                        await tap(page, search_box, "Search Bar")
+                        log_msg(f"⌨️ Typing '{TARGET_COUNTRY}'...")
+                        await page.keyboard.type(TARGET_COUNTRY, delay=100)
+                        await wait_and_log(2)
+
+                        # Select
+                        target_country_opt = page.get_by_text(TARGET_COUNTRY, exact=True).first
+                        if await target_country_opt.count() > 0:
+                            await tap(page, target_country_opt, f"Select {TARGET_COUNTRY}")
+                            await wait_and_log(3)
+                        else:
+                            log_msg("❌ Country not found in list")
+                else:
+                    log_msg("⚠️ Country Selector not found")
+
+                await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_03_country_set.jpg")
+
+                # STEP 4: AGREE TERMS
+                agree_text = page.get_by_text("Huawei ID User Agreement").first
+                if await agree_text.count() > 0:
+                    await tap(page, agree_text, "Terms Checkbox")
+                    await wait_and_log(1)
+
+                agree_btn = page.get_by_text("Agree", exact=True).first
+                if await agree_btn.count() == 0: agree_btn = page.get_by_text("Next", exact=True).first
+                
+                if await agree_btn.count() > 0:
+                    await tap(page, agree_btn, "Agree/Next")
+                    await wait_and_log(4)
+
+                # STEP 5: DOB (Scroll Wheel)
+                log_msg("📅 Handling DOB...")
+                await page.mouse.move(200, 500)
+                await page.mouse.down()
+                await page.mouse.move(200, 800, steps=20)
+                await page.mouse.up()
+                await wait_and_log(2)
+                
+                dob_next = page.get_by_text("Next", exact=True).first
+                if await dob_next.count() > 0:
+                    await tap(page, dob_next, "DOB Next")
+                    await wait_and_log(3)
+
+                # STEP 6: PHONE OPTION
+                use_phone = page.get_by_text("Use phone number", exact=False).first
+                if await use_phone.count() > 0:
+                    await tap(page, use_phone, "Use Phone Option")
+                    await wait_and_log(2)
+
+                await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_04_input_screen.jpg")
+
+                # STEP 7: INPUT & CODE
+                inp = page.locator("input[type='tel']").first
+                if await inp.count() == 0: inp = page.locator("input").first
+                
+                if await inp.count() > 0:
+                    await tap(page, inp, "Input")
+                    
+                    for char in current_number:
+                        await page.keyboard.type(char)
+                        await asyncio.sleep(0.3)
+                    await page.touchscreen.tap(20, 100) # Blur
+                    await wait_and_log(1)
+                    
+                    get_code = page.locator(".get-code-btn").first
+                    if await get_code.count() == 0: get_code = page.get_by_text("Get code", exact=False).first
+                    
+                    if await get_code.count() > 0:
+                        await tap(page, get_code, "GET CODE")
+                        log_msg("⏳ Waiting 10s for result...")
+                        await asyncio.sleep(10)
+                        
+                        await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_05_final.jpg")
+                        
+                        # --- 🚨 ERROR CHECK (ONE STRIKE POLICY) ---
+                        if await page.get_by_text("Unexpected problem").count() > 0:
+                            log_msg("🛑 BLOCKED! Closing session immediately to rotate IP...")
+                            await browser.close()
+                            continue # Jump to next iteration of While Loop (Next Number)
+                        
+                        # Check for Success
+                        if len(page.frames) > 1 or await page.locator("iframe").count() > 0:
+                             log_msg("🎉 BINGO! CAPTCHA DETECTED!")
+                             await page.screenshot(path=f"{CAPTURE_DIR}/{session_id}_SUCCESS.jpg")
+                             await browser.close()
+                             return # Stop script on success? Or remove this return to keep going
+                        else:
+                             log_msg("❓ No popup? Check logs.")
+                    else:
+                        log_msg("❌ Get Code Button Missing")
+                else:
+                    log_msg("❌ Input Missing")
+
+                await browser.close()
+
+            except Exception as e:
+                log_msg(f"❌ Error: {str(e)}")
+                await browser.close()
+                # Continue loop even on crash to keep rotating
+                continue
