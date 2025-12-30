@@ -328,19 +328,6 @@ async def visual_tap(page, element, desc):
         if box:
             x = box['x'] + box['width'] / 2
             y = box['y'] + box['height'] / 2
-            await page.evaluate(f"""
-                var dot = document.createElement('div');
-                dot.style.position = 'absolute'; 
-                dot.style.left = '{x}px'; 
-                dot.style.top = '{y}px';
-                dot.style.width = '20px'; 
-                dot.style.height = '20px'; 
-                dot.style.background = 'red';
-                dot.style.borderRadius = '50%'; 
-                dot.style.zIndex = '999999'; 
-                dot.style.border = '2px solid yellow';
-                document.body.appendChild(dot);
-            """)
             log_msg(f"👆 Tapping {desc}...")
             await page.touchscreen.tap(x, y)
             return True
