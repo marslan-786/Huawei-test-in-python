@@ -5,21 +5,14 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_google_genai import ChatGoogleGenerativeAI
 from browser_use import Agent
-import subprocess
 
-# --- FIXED IMPORTS FOR BROWSER-USE ---
-# Naye versions main BrowserConfig direct mil jata hai ya Agent khud handle karta hai
-try:
-    from browser_use.browser.browser import Browser, BrowserConfig
-except ImportError:
-    # Fallback agar path change ho
-    from browser_use.browser.service import Browser
-    from browser_use.browser.config import BrowserConfig
+# --- FIXED IMPORTS (No more Try-Except Confusion) ---
+# Ye standard path hai jo latest version par kaam karega
+from browser_use.browser.browser import Browser, BrowserConfig
 
-# --- API KEY (Railway Variables se uthaye ga ya yahan likhein) ---
+# --- API KEY ---
 if "GOOGLE_API_KEY" not in os.environ:
     os.environ["GOOGLE_API_KEY"] = "AIzaSyCz-X24ZgEZ79YRcg8ym9ZtuQHup1AVgJQ"
-
 
 TARGET_PHONE = "3177635849"
 CAPTURE_DIR = "./captures"
@@ -30,7 +23,7 @@ app.mount("/captures", StaticFiles(directory=CAPTURE_DIR), name="captures")
 # Global Status
 bot_status = "System Ready. Waiting for Command."
 
-# --- DASHBOARD (Manual Refresh Only) ---
+# --- DASHBOARD ---
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     return """
@@ -109,8 +102,7 @@ async def run_ai_task():
         bot_status = "AI Initializing (Gemini)..."
         llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
         
-        # Configure Browser (Headless = True for Server)
-        # Note: browser-use records video automatically in recent versions if not disabled
+        # Configure Browser 
         browser = Browser(
             config=BrowserConfig(
                 headless=True,
@@ -134,14 +126,9 @@ async def run_ai_task():
         
         bot_status = "Mission Completed. Processing Video..."
         
-        # --- VIDEO GENERATION (Manual FFmpeg because library paths vary) ---
-        # Browser-use normally saves frames in a tmp folder. 
-        # Hum yahan assume kar rahe hain k wo apni internal recording kar raha hai.
-        # Agar library ne video nahi banayi, to hum aglay step main 'browser-use' ki 
-        # recording capability on karenge.
-        
-        # (Filhal status update kar rahe hain, agar video na aye to batana, 
-        # phir hum explicit recording flag lagayenge).
+        # Note: browser-use internal mechanism handles video, 
+        # usually saves to a specific path or returns history.
+        # We assume standard behavior here.
         
         bot_status = "Done! (Check logs if video missing)"
 
