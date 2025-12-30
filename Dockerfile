@@ -1,6 +1,6 @@
 FROM python:3.11-bookworm
 
-# Install System Deps
+# Install Dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libnss3 \
@@ -22,11 +22,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy Requirements First
+# Install Python Libs (No Cache)
 COPY requirements.txt .
-
-# FORCE NO CACHE INSTALL (Fixes version mismatch issues)
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -U -r requirements.txt
 
 # Install Playwright
 RUN playwright install chromium
@@ -34,9 +32,7 @@ RUN playwright install-deps
 
 # Copy Code
 COPY . .
-
-# Permissions
 RUN mkdir -p captures && chmod 777 captures
 
-# Start Command
+# Run
 CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"
