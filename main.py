@@ -1,17 +1,15 @@
 import os
-import sys
 import asyncio
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_google_genai import ChatGoogleGenerativeAI
 from browser_use import Agent
+from pydantic import SecretStr
 
 # --- SMART IMPORT LOGIC ---
 Browser = None
 BrowserConfig = None
-
-# Try importing Browser safely
 try:
     from browser_use.browser.browser import Browser, BrowserConfig
 except ImportError:
@@ -24,6 +22,11 @@ except ImportError:
 # --- API KEY ---
 if "GOOGLE_API_KEY" not in os.environ:
     os.environ["GOOGLE_API_KEY"] = "YOUR_GEMINI_API_KEY_HERE"
+
+# --- 🛠️ THE REAL FIX (Subclassing) ---
+# Hum Google ki class ko "Extend" kar rahe hain taake Pydantic error na de
+class FixedGoogleLLM(ChatGoogleGenerativeAI):
+    provider: str = "google"  # Ab ye field legally exist karti hai
 
 TARGET_PHONE = "3177635849"
 CAPTURE_DIR = "./captures"
@@ -41,7 +44,7 @@ async def dashboard():
     <html>
     <head>
         <title>Huawei AI Agent</title>
-        <meta http-equiv="refresh" content="30"> <style>
+        <style>
             body { background-color: #121212; color: #fff; font-family: monospace; text-align: center; padding: 50px; }
             .box { border: 1px solid #333; padding: 20px; max-width: 600px; margin: auto; background: #1e1e1e; }
             button { padding: 15px 30px; font-size: 18px; cursor: pointer; margin: 10px; border-radius: 5px; border:none; }
@@ -51,7 +54,7 @@ async def dashboard():
         </style>
     </head>
     <body>
-        <h1>🤖 Huawei AI Agent</h1>
+        <h1>🤖 Huawei AI Agent (Patched)</h1>
         <div class="box">
             <h3>Status: <span id="status" class="status-text">Idle</span></h3>
             <button class="refresh" onclick="checkStatus()">🔄 Refresh Status</button>
@@ -65,10 +68,9 @@ async def dashboard():
                 });
             }
             function startBot() {
-                document.getElementById('status').innerText = "Starting...";
+                document.getElementById('status').innerText = "Request Sent...";
                 fetch('/start', {method: 'POST'});
             }
-            // Check status on load
             checkStatus();
         </script>
     </body>
@@ -92,17 +94,15 @@ async def start_bot_endpoint(background_tasks: BackgroundTasks):
 async def run_ai_task():
     global bot_status
     try:
-        bot_status = "AI Initializing (Gemini)..."
+        bot_status = "AI Initializing (Fixing LLM)..."
         
-        # 1. Setup LLM
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
-        
-        # --- THE FIX: Manually set the provider attribute ---
-        # Ye line us error ko khatam karegi 'object has no attribute provider'
-        if not hasattr(llm, "provider"):
-            setattr(llm, "provider", "google")
-            setattr(llm, "model_name", "gemini-1.5-flash")
-        # --------------------------------------------------
+        # 1. Setup LLM using our FIXED Class
+        # Hamari apni class use hogi jisme 'provider' field majood hai
+        api_key = os.environ["GOOGLE_API_KEY"]
+        llm = FixedGoogleLLM(
+            model="gemini-1.5-flash", 
+            google_api_key=SecretStr(api_key)
+        )
 
         # 2. Setup Browser
         agent = None
@@ -114,11 +114,11 @@ async def run_ai_task():
                 llm=llm,
                 browser=browser
             )
-            bot_status = "AI Running (High Performance Mode)..."
+            bot_status = "AI Running (Custom Browser)..."
         else:
             # Fallback
             agent = Agent(task=get_task_prompt(), llm=llm)
-            bot_status = "AI Running (Basic Mode)..."
+            bot_status = "AI Running (Default Browser)..."
 
         # 3. Run
         await agent.run()
