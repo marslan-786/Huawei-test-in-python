@@ -6,8 +6,8 @@ from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_google_genai import ChatGoogleGenerativeAI
-# Sirf Agent import karein, baki ye khud handle karega
 from browser_use import Agent
+from pydantic import SecretStr
 
 # --- API KEY ---
 if "GOOGLE_API_KEY" not in os.environ:
@@ -21,7 +21,7 @@ if not os.path.exists(CAPTURE_DIR):
     os.makedirs(CAPTURE_DIR)
 app.mount("/captures", StaticFiles(directory=CAPTURE_DIR), name="captures")
 
-# --- LOGGING SYSTEM ---
+# --- LOGGING ---
 logs = []
 def log_msg(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -41,16 +41,16 @@ async def dashboard():
         <style>
             body { background: #000; color: #0f0; font-family: monospace; padding: 20px; text-align: center; }
             .box { border: 1px solid #333; padding: 10px; margin: 10px auto; max-width: 800px; background: #111; }
-            button { padding: 10px 20px; font-weight: bold; cursor: pointer; }
-            .logs { height: 300px; overflow-y: auto; text-align: left; border: 1px solid #444; padding: 10px; color: #ddd; }
+            button { padding: 10px 20px; font-weight: bold; cursor: pointer; border:none; margin:5px; }
+            .logs { height: 300px; overflow-y: auto; text-align: left; border: 1px solid #444; padding: 10px; color: #ddd; font-size:14px; }
             .gallery img { height: 100px; border: 1px solid #555; margin: 2px; }
         </style>
     </head>
     <body>
-        <h1>🤖 FINAL AI AGENT</h1>
+        <h1>🤖 FINAL FIXED AGENT</h1>
         <div class="box">
             <button onclick="startBot()" style="background:red;color:white;">🚀 START MISSION</button>
-            <button onclick="refresh()" style="background:blue;color:white;">🔄 REFRESH</button>
+            <button onclick="refresh()" style="background:blue;color:white;">🔄 REFRESH LOGS</button>
         </div>
         <div class="box logs" id="logs">Waiting...</div>
         <div class="box gallery" id="gallery"></div>
@@ -88,42 +88,45 @@ async def start_bot(bt: BackgroundTasks):
     bt.add_task(run_agent)
     return {"status": "started"}
 
+# --- 🛠️ THE REAL FIX IS HERE ---
+# Hum ek nayi class bana rahe hain jo Google ki class se sab kuch leti hai
+# lekin 'provider' field ko Pydantic Schema main legally add karti hai.
+class FixedGemini(ChatGoogleGenerativeAI):
+    provider: str = "google" # This fixes the 'no attribute' error
+
 # --- MAIN LOGIC ---
 async def run_agent():
     try:
-        log_msg("1. Setting up Gemini LLM...")
+        log_msg("1. Setting up Gemini LLM (Patched Class)...")
         api_key = os.environ.get("GOOGLE_API_KEY")
         
-        # Newest LangChain syntax
-        llm = ChatGoogleGenerativeAI(
+        # Use our FIXED class instead of the standard one
+        llm = FixedGemini(
             model="gemini-1.5-flash", 
-            google_api_key=api_key,
+            google_api_key=SecretStr(api_key),
             temperature=0
         )
         
         log_msg("2. Initializing Browser Agent...")
         
-        # HUM BROWSER OBJECT MANUALLY NAHI BANAYENGE
-        # Hum Agent ko bolenge k wo khud handle kare.
-        # Docker main Playwright default headless hi hota hai.
-        
         task_text = f"""
         Go to 'https://id5.cloud.huawei.com/CAS/mobile/standard/register/wapRegister.html?reqClientType=7&loginChannel=7000000&regionCode=hk&loginUrl=https%3A%2F%2Fid5.cloud.huawei.com%2FCAS%2Fmobile%2Fstandard%2FwapLogin.html&lang=en-us&themeName=huawei#/wapRegister/regByPhone'
         Wait for network idle.
-        Click on the element that says 'Country/Region'.
+        Find and Click on 'Country/Region'.
         Type 'Pakistan' and select 'Pakistan +92'.
         Fill the phone input with '{TARGET_PHONE}'.
         Click the 'Get code' button.
         """
 
+        # Agent ko sirf LLM aur Task dein, Browser wo khud sambhal lega
         agent = Agent(
             task=task_text,
             llm=llm,
         )
 
-        log_msg("3. AI Agent Running (Using native functionality)...")
+        log_msg("3. AI Agent Running (Watching screen)...")
         
-        # Ye function ab 'ainvoke' error nahi dega kyun k hum ne requirements update kar di hain
+        # Ab ye crash nahi karega
         history = await agent.run()
         
         log_msg("✅ Mission Finished.")

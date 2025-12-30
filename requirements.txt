@@ -7,4 +7,4 @@ langchain-google-genai>=2.0.0
 playwright
 python-dotenv
 aiofiles
-pydantic
+pydantic>=2.0
