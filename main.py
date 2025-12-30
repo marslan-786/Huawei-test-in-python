@@ -10,7 +10,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from playwright.async_api import async_playwright
 
-# --- IMPORT CAPTCHA SOLVER ---
 from captcha_solver import solve_captcha
 
 # --- CONFIGURATION ---
@@ -30,7 +29,6 @@ app = FastAPI()
 if not os.path.exists(CAPTURE_DIR): os.makedirs(CAPTURE_DIR)
 app.mount("/captures", StaticFiles(directory=CAPTURE_DIR), name="captures")
 
-# --- LOGGING ---
 logs = []
 def log_msg(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -60,19 +58,19 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Burst Capture</title>
+        <title>Huawei Force Clicker</title>
         <style>
-            body { background: #1a1a1a; color: #00e676; font-family: monospace; padding: 20px; text-align: center; }
-            button { padding: 10px 20px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #6200ea; color: white; border-radius: 4px; }
-            .logs { height: 300px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #000; margin-bottom: 20px; font-size: 13px; color: #ccc; }
+            body { background: #111; color: #ffeb3b; font-family: monospace; padding: 20px; text-align: center; }
+            button { padding: 10px 20px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #d50000; color: white; border-radius: 4px; }
+            .logs { height: 300px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #000; margin-bottom: 20px; font-size: 13px; color: #ddd; }
             .gallery { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
             .gallery img { height: 100px; border: 1px solid #444; }
         </style>
     </head>
     <body>
-        <h1>📸 HUAWEI BURST MODE BOT</h1>
-        <p>Capturing every second | Waiting for Captcha Load</p>
-        <button onclick="startBot()">🚀 START BURST TEST</button>
+        <h1>🔨 HUAWEI AGGRESSIVE CLICKER</h1>
+        <p>Double Tap Logic | Scroll to View | Burst Capture</p>
+        <button onclick="startBot()">🚀 START FORCE CLICK</button>
         <button onclick="refreshData()" style="background: #009688;">🔄 REFRESH</button>
         <div class="logs" id="logs">Waiting...</div>
         <h3>📸 LIVE FEED</h3>
@@ -86,7 +84,7 @@ async def dashboard():
                 });
             }
             function logUpdate(msg) { document.getElementById('logs').innerHTML = "<div>" + msg + "</div>" + document.getElementById('logs').innerHTML; }
-            setInterval(refreshData, 2000); // Faster refresh
+            setInterval(refreshData, 2000);
         </script>
     </body>
     </html>
@@ -105,6 +103,10 @@ async def start_bot(bt: BackgroundTasks):
 
 async def visual_tap(page, element, desc):
     try:
+        # First ensure it's in view
+        await element.scroll_into_view_if_needed()
+        await asyncio.sleep(0.5)
+        
         box = await element.bounding_box()
         if box:
             x = box['x'] + box['width'] / 2
@@ -121,25 +123,21 @@ async def visual_tap(page, element, desc):
     except: pass
     return False
 
-# --- 🔥 NEW: WAIT & CAPTURE EVERY SECOND ---
 async def wait_and_capture(page, seconds, session_id, step_name):
     log_msg(f"⏳ Waiting {seconds}s ({step_name})...")
     for i in range(seconds):
         await asyncio.sleep(1)
-        # 01, 02 format for sorting
         filename = f"{session_id}_{step_name}_{i:02d}.jpg"
         await page.screenshot(path=f"{CAPTURE_DIR}/{filename}")
-        log_msg(f"📸 Captured: {filename}")
     log_msg("✅ Wait Complete.")
 
 # --- MAIN FLOW ---
 async def run_hk_flow():
-    # Clear old captures to keep gallery clean
     for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
-
     session_id = int(time.time())
-    current_number = get_next_number() # Uses numbers.txt
-    if not current_number: current_number = generate_hk_number() # Fallback
+    
+    current_number = get_next_number()
+    if not current_number: current_number = generate_hk_number()
     
     log_msg(f"🎬 Session {session_id} | Number: {current_number}")
 
@@ -174,7 +172,7 @@ async def run_hk_flow():
                 await visual_tap(page, reg_btn, "Register")
                 await wait_and_capture(page, 5, session_id, "02_registering")
             
-            # Agree Terms
+            # Terms
             agree_text = page.get_by_text("Huawei ID User Agreement").first
             if await agree_text.count() > 0: await visual_tap(page, agree_text, "Terms")
             await asyncio.sleep(1)
@@ -186,7 +184,6 @@ async def run_hk_flow():
                 await wait_and_capture(page, 4, session_id, "03_terms_done")
 
             # DOB
-            log_msg("📅 DOB Scroll...")
             await page.mouse.move(200, 500)
             await page.mouse.down()
             await page.mouse.move(200, 800, steps=20)
@@ -202,7 +199,7 @@ async def run_hk_flow():
             if await use_phone.count() > 0: await visual_tap(page, use_phone, "Use Phone")
             await asyncio.sleep(2)
 
-            # Input & Code
+            # Input
             inp = page.locator("input[type='tel']").first
             if await inp.count() == 0: inp = page.locator("input").first
             
@@ -211,31 +208,35 @@ async def run_hk_flow():
                 for char in current_number:
                     await page.keyboard.type(char)
                     await asyncio.sleep(0.2)
-                await page.touchscreen.tap(20, 100) # Blur
+                
+                # --- NEW: CLOSE KEYBOARD FORCEFULLY ---
+                # Tapping outside or sending a dummy key
+                await page.touchscreen.tap(350, 100) 
                 await asyncio.sleep(1)
                 
+                # --- GET CODE LOGIC (WITH RETRY) ---
                 get_code = page.locator(".get-code-btn").first
                 if await get_code.count() == 0: get_code = page.get_by_text("Get code", exact=False).first
                 
                 if await get_code.count() > 0:
-                    await visual_tap(page, get_code, "GET CODE")
+                    # ATTEMPT 1
+                    await visual_tap(page, get_code, "GET CODE (Try 1)")
+                    await asyncio.sleep(2)
                     
-                    # --- 🔥 CRITICAL CHANGE: WAIT 10s & CAPTURE EVERYTHING ---
-                    log_msg("⏳ Waiting 10s for Captcha to LOAD fully...")
-                    # Ye function har second picture le ga taake loading nazar aye
+                    # CHECK IF CLICKED (Did captcha appear?)
+                    if len(page.frames) == 1:
+                        log_msg("⚠️ First click didn't work. Retrying Force Click...")
+                        await visual_tap(page, get_code, "GET CODE (Try 2 - Force)")
+                    
+                    log_msg("⏳ Waiting 10s for Captcha Load...")
                     await wait_and_capture(page, 10, session_id, "05_captcha_loading")
                     
-                    # Ab check karte hain k kya load hua
                     if len(page.frames) > 1:
-                        log_msg("🧩 CAPTCHA LOADED! Analyzing...")
-                        
-                        # Call Solver (Analysis Mode)
+                        log_msg("🧩 CAPTCHA LOADED!")
                         await solve_captcha(page, session_id)
-                        
-                        # Solve k baad ki recording
                         await wait_and_capture(page, 5, session_id, "06_post_solve")
                     else:
-                        log_msg("❓ Captcha did not appear in 10s.")
+                        log_msg("❓ Still no Captcha. Screenshot saved.")
             
             await browser.close()
         except Exception as e:
