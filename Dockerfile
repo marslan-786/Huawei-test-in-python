@@ -1,6 +1,6 @@
 FROM python:3.11-bookworm
 
-# Install System Dependencies
+# 1. System Deps (Playwright Needs These)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libnss3 \
@@ -24,20 +24,17 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy Requirements
+# 2. Python Install
 COPY requirements.txt .
+RUN pip install --no-cache-dir -U -r requirements.txt
 
-# Install Python Libs (Ensure Upgrade)
-RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Install Playwright
+# 3. Install Browsers
 RUN playwright install chromium
 RUN playwright install-deps
 
-# Copy Source
+# 4. Copy Code
 COPY . .
 RUN mkdir -p captures && chmod 777 captures
 
-# Run
+# 5. Run
 CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"
