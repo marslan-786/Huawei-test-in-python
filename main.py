@@ -11,7 +11,6 @@ from playwright.async_api import async_playwright
 TARGET_PHONE = "3177635849"
 CAPTURE_DIR = "./captures"
 
-# آپ کا دیا ہوا لنک (جس میں پاکستان پہلے سے سلیکٹڈ ہے)
 MAGIC_URL = "https://id5.cloud.huawei.com/CAS/mobile/standard/register/wapRegister.html?reqClientType=61&loginChannel=61000000&regionCode=pk&loginUrl=https%3A%2F%2Fid5.cloud.huawei.com%2FCAS%2Fmobile%2Fstandard%2FwapLogin.html&lang=en-us&themeName=huawei&clientID=101476933&service=https%3A%2F%2Foauth-login.cloud.huawei.com%2Foauth2%2Fv2%2Fauthorize%3Faccess_type%3Doffline&from=login/wapRegister/regByPhone#/wapRegister/regByPhone"
 
 app = FastAPI()
@@ -43,7 +42,7 @@ async def dashboard():
         </style>
     </head>
     <body>
-        <h1>🎯 HUAWEI PRECISION BOT</h1>
+        <h1>🎯 HUAWEI PRECISION BOT (FIXED)</h1>
         <div class="box">
             <button onclick="startBot()">🚀 START ACCURATE MODE</button>
             <button onclick="refreshData()" style="background: #3498db;">🔄 REFRESH</button>
@@ -79,22 +78,22 @@ async def start_bot(bt: BackgroundTasks):
     bt.add_task(run_precision_agent)
     return {"status": "started"}
 
-# --- HELPER: SHOW RED DOT ---
+# --- HELPER: SHOW RED DOT (Now with Ghost Mode) ---
 async def show_red_dot(page, selector=None, x=None, y=None):
-    """Draws a red dot on the clicked element or coordinates"""
     if selector:
-        # Get element center
         box = await selector.bounding_box()
         if box:
             x = box['x'] + box['width'] / 2
             y = box['y'] + box['height'] / 2
     
     if x and y:
+        # NOTE: Added 'pointerEvents: none' so clicks pass through it!
         await page.evaluate(f"""
             var d = document.createElement('div');
             d.style.position='absolute';d.style.left='{x-10}px';d.style.top='{y-10}px';
             d.style.width='20px';d.style.height='20px';d.style.background='red';
             d.style.borderRadius='50%';d.style.zIndex='99999';d.style.border='2px solid white';
+            d.style.pointerEvents='none'; 
             document.body.appendChild(d);
         """)
 
@@ -104,7 +103,6 @@ async def run_precision_agent():
         for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
 
         async with async_playwright() as p:
-            # Mobile Emulation Setup
             browser = await p.chromium.launch(headless=True, args=['--no-sandbox'])
             context = await browser.new_context(
                 viewport={"width": 412, "height": 915},
@@ -117,12 +115,11 @@ async def run_precision_agent():
             log_msg("🚀 Loading Page...")
             await page.goto(MAGIC_URL)
             
-            # Wait for specific text "Phone number" to ensure load
             try:
                 await page.wait_for_selector("text=Phone number", timeout=15000)
-                log_msg("✅ Page Loaded. Text 'Phone number' found.")
+                log_msg("✅ Page Loaded.")
             except:
-                log_msg("⚠️ Warning: Text load timeout, proceeding anyway...")
+                log_msg("⚠️ Warning: Text load timeout...")
             
             await asyncio.sleep(2)
             await page.screenshot(path=f"{CAPTURE_DIR}/01_loaded.jpg")
@@ -130,21 +127,20 @@ async def run_precision_agent():
             # --- STEP 1: FIND PHONE INPUT ---
             log_msg("🔍 Finding 'Phone number' field...")
             
-            # Strategy: Find label "Phone number" or placeholder
-            # Playwright ka smart locator jo input dhoondta hai
             phone_input = page.locator("input[type='tel']") 
             
-            # Agar input mil jaye to Red Dot lagao aur click karo
             if await phone_input.count() > 0:
+                # 1. Show Dot (Non-blocking now)
                 await show_red_dot(page, selector=phone_input.first)
                 await page.screenshot(path=f"{CAPTURE_DIR}/02_target_phone.jpg")
                 
-                await phone_input.first.click()
-                log_msg("✅ Clicked Input Field")
-                await asyncio.sleep(1)
+                # 2. Force Click (Just in case)
+                log_msg("⚡ Clicking Input Field...")
+                await phone_input.first.click(force=True) 
                 
+                # 3. Fill Number
                 log_msg(f"⌨️ Typing: {TARGET_PHONE}")
-                await page.keyboard.type(TARGET_PHONE, delay=100)
+                await phone_input.first.fill(TARGET_PHONE) # 'fill' is better than 'type'
                 await asyncio.sleep(1)
                 await page.screenshot(path=f"{CAPTURE_DIR}/03_filled.jpg")
             else:
@@ -154,14 +150,14 @@ async def run_precision_agent():
             # --- STEP 2: FIND GET CODE BUTTON ---
             log_msg("🔍 Finding 'Get code' button...")
             
-            # Text based locator - 100% Accurate
             get_code_btn = page.get_by_text("Get code")
             
             if await get_code_btn.count() > 0:
                 await show_red_dot(page, selector=get_code_btn.first)
                 await page.screenshot(path=f"{CAPTURE_DIR}/04_target_button.jpg")
                 
-                await get_code_btn.first.click()
+                # Force click here too
+                await get_code_btn.first.click(force=True)
                 log_msg("✅ Clicked 'Get code'")
             else:
                 log_msg("❌ ERROR: 'Get code' text not found!")
