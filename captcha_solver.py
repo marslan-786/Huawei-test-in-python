@@ -6,13 +6,68 @@ import random
 ROWS = 2
 COLS = 4
 
-async def solve_captcha(page, session_id):
-    print("🧠 SOLVER: Calculating GLOBAL Coordinates for Drag...")
+# --- 🧠 BEZIER CURVE MATH (HUMAN MOVEMENT) ---
+def get_bezier_point(t, p0, p1, p2, p3):
+    """Calculates position at time t (0 to 1) on a cubic bezier curve"""
+    cX = 3 * (p1['x'] - p0['x'])
+    bX = 3 * (p2['x'] - p1['x']) - cX
+    aX = p3['x'] - p0['x'] - cX - bX
+
+    cY = 3 * (p1['y'] - p0['y'])
+    bY = 3 * (p2['y'] - p1['y']) - cY
+    aY = p3['y'] - p0['y'] - cY - bY
+
+    x = (aX * t**3) + (bX * t**2) + (cX * t) + p0['x']
+    y = (aY * t**3) + (bY * t**2) + (cY * t) + p0['y']
+    return {'x': x, 'y': y}
+
+async def human_drag(page, start_x, start_y, end_x, end_y):
+    """Moves mouse from A to B using a random Bezier curve path"""
+    print(f"🎨 Generating Human Path: ({int(start_x)},{int(start_y)}) -> ({int(end_x)},{int(end_y)})")
     
-    # 1. FIND THE CAPTCHA FRAME
+    # 1. Create Control Points for the Curve (Randomness)
+    # P0 = Start, P3 = End
+    # P1 & P2 are random points in between to create a curve
+    p0 = {'x': start_x, 'y': start_y}
+    p3 = {'x': end_x, 'y': end_y}
+    
+    # Random deviation
+    offset = random.randint(50, 150)
+    p1 = {'x': start_x + random.randint(-offset, offset), 'y': start_y + random.randint(-offset, offset)}
+    p2 = {'x': end_x + random.randint(-offset, offset), 'y': end_y + random.randint(-offset, offset)}
+
+    # 2. Move Mouse along the curve
+    steps = 25 # Total steps for drag
+    
+    await page.mouse.move(start_x, start_y)
+    await page.mouse.down()
+    print("✊ Grabbing...")
+    await asyncio.sleep(0.2)
+
+    for i in range(steps + 1):
+        t = i / steps
+        point = get_bezier_point(t, p0, p1, p2, p3)
+        await page.mouse.move(point['x'], point['y'])
+        # Variable speed (slow start, fast middle, slow end)
+        sleep_time = random.uniform(0.01, 0.03)
+        await asyncio.sleep(sleep_time)
+
+    # 3. Overshoot (Go slightly past target and come back)
+    await page.mouse.move(end_x + 5, end_y + 5, steps=5)
+    await asyncio.sleep(0.1)
+    await page.mouse.move(end_x, end_y, steps=5)
+    
+    print("✋ Releasing...")
+    await page.mouse.up()
+
+
+# --- MAIN SOLVER ---
+async def solve_captcha(page, session_id):
+    print("🧠 SOLVER: Using Bezier Curve Logic...")
+    
+    # 1. FIND FRAME (Using your text sandwich logic)
     frames = page.frames
     captcha_frame = None
-    
     for frame in frames:
         try:
             if await frame.get_by_text("swap 2 tiles", exact=False).count() > 0:
@@ -20,54 +75,28 @@ async def solve_captcha(page, session_id):
                 break
         except: continue
     
-    # Fallback
     if not captcha_frame and len(frames) > 1: captcha_frame = frames[-1]
-    
-    if not captcha_frame:
-        print("❌ Captcha Frame Not Found")
-        return False
+    if not captcha_frame: return False
 
-    # 2. FIND BOUNDARIES INSIDE FRAME
+    # 2. BOUNDARIES
     header = captcha_frame.get_by_text("Please complete verification", exact=False).first
     footer = captcha_frame.get_by_text("swap 2 tiles", exact=False).first
     
-    if await header.count() == 0:
-        print("❌ Header text missing")
-        return False
-
-    # Get Bounding Boxes inside the frame
+    if await header.count() == 0: return False
+    
     head_box = await header.bounding_box()
     foot_box = await footer.bounding_box()
     
-    if not head_box or not foot_box:
-        print("❌ Bounds missing")
-        return False
+    if not head_box or not foot_box: return False
 
-    # 3. GET FRAME OFFSET (CRITICAL STEP)
-    # We need to know where the FRAME is on the PAGE
-    # Usually, we can't get frame element directly easily, so we use a trick:
-    # We use page.mouse logic directly on known elements if frame has no offset issue.
-    # However, Playwright handles frame coordinates automatically if we use frame.mouse
-    # BUT we want to draw dots on the MAIN PAGE to be sure.
-    
-    # Let's rely on Playwright's auto-conversion for mouse, 
-    # but for DOTS we need to be careful.
-    
-    # CALCULATE GRID (Inside Frame Logic)
-    top_pad = 10
-    bot_pad = 10
-    
+    # 3. GRID CALCULATION
+    top_pad = 10; bot_pad = 10
     grid_y = head_box['y'] + head_box['height'] + top_pad
     grid_height = foot_box['y'] - grid_y - bot_pad
-    
-    # Use Footer Width as reference
-    grid_width = foot_box['width'] 
+    grid_width = foot_box['width']
     grid_x = foot_box['x']
     
-    # Safety Check
     if grid_height < 50: grid_height = 150
-
-    print(f"📏 Grid (Frame Relative): X={int(grid_x)}, Y={int(grid_y)}, W={int(grid_width)}, H={int(grid_height)}")
 
     # 4. TILE CENTERS
     tile_width = grid_width / COLS
@@ -80,65 +109,20 @@ async def solve_captcha(page, session_id):
         y = grid_y + (row * tile_height) + (tile_height / 2)
         return x, y
 
-    # Swap 0 -> 7
     sx, sy = get_tile_center(0)
     tx, ty = get_tile_center(7)
 
-    # --- 5. VISUAL DOTS (ON MAIN PAGE via Frame Evaluation) ---
-    # We will try to draw dots inside the frame again, but with high Z-index and border
+    # 5. EXECUTE HUMAN DRAG (USING PAGE MOUSE)
+    # We use 'page.mouse' because frames can be tricky with coordinates.
+    # But first we need to ensure we are clicking in the right place relative to viewport.
+    # Usually playwright handles frame offset automatically if we use frame.mouse.
+    
+    # Let's try `captcha_frame.mouse` FIRST with the new algorithm
     try:
-        await captcha_frame.evaluate(f"""
-            var d1 = document.createElement('div');
-            d1.style.position = 'absolute'; left='{sx}px'; top='{sy}px';
-            d1.style.width='30px'; height='30px'; background='rgba(255,0,0,0.8)'; 
-            d1.style.borderRadius='50%'; d1.style.border='3px solid yellow'; d1.style.zIndex='2147483647';
-            d1.style.pointerEvents='none';
-            document.body.appendChild(d1);
-            
-            var d2 = document.createElement('div');
-            d2.style.position = 'absolute'; left='{tx}px'; top='{ty}px';
-            d2.style.width='30px'; height='30px'; background='rgba(0,255,0,0.8)'; 
-            d2.style.borderRadius='50%'; d2.style.border='3px solid yellow'; d2.style.zIndex='2147483647';
-            d2.style.pointerEvents='none';
-            document.body.appendChild(d2);
-        """)
+        await human_drag(captcha_frame, sx, sy, tx, ty)
+        return True
     except Exception as e:
-        print(f"Dot Error: {e}")
-
-    await asyncio.sleep(0.5)
-
-    # --- 6. EXECUTE DRAG (USING PAGE MOUSE WITH FRAME OFFSET) ---
-    # Important: page.mouse expects global coordinates. 
-    # captcha_frame.mouse expects relative. Let's stick to captcha_frame.mouse
-    # BUT Playwright 1.40+ sometimes has issues with frame.mouse.
-    # Let's try controlling the PAGE mouse but by calculating global position if possible.
-    # For now, sticking to frame.mouse which *should* work if element is found.
-    
-    print(f"🖱️ Moving to Source ({int(sx)}, {int(sy)})...")
-    await captcha_frame.mouse.move(sx, sy, steps=10)
-    await asyncio.sleep(0.5)
-    
-    print("✊ GRABBING...")
-    await captcha_frame.mouse.down()
-    await asyncio.sleep(0.5)
-    
-    # WIGGLE TO ACTIVATE
-    await captcha_frame.mouse.move(sx + 10, sy, steps=5)
-    await captcha_frame.mouse.move(sx - 10, sy, steps=5)
-    await captcha_frame.mouse.move(sx, sy, steps=5)
-    await asyncio.sleep(0.5) # Wait to ensure grab
-    
-    print("🚀 DRAGGING...")
-    await captcha_frame.mouse.move(tx, ty, steps=50) # Slow steps
-    
-    # OVERSHOOT (Human Touch)
-    await captcha_frame.mouse.move(tx + 5, ty + 5, steps=10)
-    await asyncio.sleep(0.2)
-    await captcha_frame.mouse.move(tx, ty, steps=10)
-    
-    await asyncio.sleep(1.0) # Hold at target
-    
-    print("✋ RELEASING...")
-    await captcha_frame.mouse.up()
-    
-    return True
+        print(f"⚠️ Frame drag failed ({e}), trying Page drag...")
+        # If frame mouse fails, try global page mouse (might need offset calculation)
+        await human_drag(page, sx, sy, tx, ty)
+        return True
