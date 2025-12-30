@@ -3,18 +3,26 @@ import glob
 import asyncio
 import random
 import time
+import imageio
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from playwright.async_api import async_playwright
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient
+from bson.binary import Binary
+import base64
 
 # --- CONFIGURATION ---
 CAPTURE_DIR = "./captures"
-DATASET_DIR = "./dataset_training"
+VIDEO_PATH = f"{CAPTURE_DIR}/proof.mp4"
+NUMBERS_FILE = "numbers.txt"
 BASE_URL = "https://id5.cloud.huawei.com"
-MONGO_URL = "mongodb://mongo:AEvrikOWlrmJCQrDTQgfGtqLlwhwLuAA@crossover.proxy.rlwy.net:29609"
+TARGET_COUNTRY = "Russia"
+
+MONGO_URI = "mongodb://mongo:AEvrikOWlrmJCQrDTQgfGtqLlwhwLuAA@crossover.proxy.rlwy.net:29609"
+DB_NAME = "huawei_captcha"
+COLLECTION_NAME = "captchas"
 
 PROXY_CONFIG = {
     "server": "http://p.webshare.io:80", 
@@ -22,19 +30,25 @@ PROXY_CONFIG = {
     "password": "582ygxexguhx"
 }
 
+# MongoDB Connection
+try:
+    mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    db = mongo_client[DB_NAME]
+    captcha_collection = db[COLLECTION_NAME]
+    mongo_client.server_info()  # Test connection
+    print("✅ MongoDB Connected Successfully")
+except Exception as e:
+    print(f"❌ MongoDB Connection Failed: {e}")
+    captcha_collection = None
+
 app = FastAPI()
 if not os.path.exists(CAPTURE_DIR): os.makedirs(CAPTURE_DIR)
-if not os.path.exists(DATASET_DIR): os.makedirs(DATASET_DIR)
-
-app.mount("/dataset", StaticFiles(directory=DATASET_DIR), name="dataset")
 app.mount("/captures", StaticFiles(directory=CAPTURE_DIR), name="captures")
 
-# --- MONGODB ---
-client = AsyncIOMotorClient(MONGO_URL)
-db = client.huawei_bot
-collection = db.captcha_dataset
-
 logs = []
+bot_running = False
+stop_requested = False
+
 def log_msg(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
     entry = f"[{timestamp}] {message}"
@@ -42,10 +56,50 @@ def log_msg(message):
     logs.insert(0, entry)
     if len(logs) > 500: logs.pop()
 
-def generate_russia_number():
-    prefix = "9"
-    rest = ''.join([str(random.randint(0, 9)) for _ in range(9)])
-    return f"{prefix}{rest}"
+def load_numbers():
+    """Load numbers from numbers.txt file"""
+    if not os.path.exists(NUMBERS_FILE):
+        log_msg(f"❌ {NUMBERS_FILE} not found!")
+        return []
+    
+    with open(NUMBERS_FILE, 'r') as f:
+        numbers = [line.strip() for line in f if line.strip()]
+    log_msg(f"📋 Loaded {len(numbers)} numbers from file")
+    return numbers
+
+def save_captcha_to_db(image_path, phone_number, session_info):
+    """Save CAPTCHA image to MongoDB"""
+    if captcha_collection is None:
+        log_msg("❌ MongoDB not connected, skipping save")
+        return False
+    
+    try:
+        with open(image_path, 'rb') as img_file:
+            img_data = img_file.read()
+        
+        document = {
+            "timestamp": datetime.now(),
+            "phone_number": phone_number,
+            "session_info": session_info,
+            "image": Binary(img_data),
+            "image_size": len(img_data)
+        }
+        
+        result = captcha_collection.insert_one(document)
+        log_msg(f"✅ CAPTCHA saved to DB (ID: {result.inserted_id})")
+        return True
+    except Exception as e:
+        log_msg(f"❌ Error saving to DB: {e}")
+        return False
+
+def get_captcha_count():
+    """Get total number of CAPTCHAs in database"""
+    if captcha_collection is None:
+        return 0
+    try:
+        return captcha_collection.count_documents({})
+    except:
+        return 0
 
 # --- DASHBOARD ---
 @app.get("/", response_class=HTMLResponse)
@@ -53,37 +107,162 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Miner Pro</title>
+        <title>Huawei CAPTCHA Collector</title>
         <style>
             body { background: #000; color: #00e676; font-family: monospace; padding: 20px; text-align: center; }
-            .btn { padding: 15px 25px; font-weight: bold; cursor: pointer; border:none; border-radius: 4px; margin: 5px; }
-            .btn-start { background: #6200ea; color: white; }
-            .btn-view { background: #2962ff; color: white; }
-            .logs { height: 300px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #0a0a0a; color: #ccc; margin-top: 20px; }
-            .gallery { display: none; flex-wrap: wrap; justify-content: center; gap: 5px; margin-top: 20px; }
-            .gallery img { height: 100px; border: 1px solid #444; }
+            button { padding: 12px 24px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #6200ea; color: white; border-radius: 4px; }
+            button:disabled { background: #555; cursor: not-allowed; }
+            
+            .status-bar { 
+                background: #333; color: yellow; padding: 10px; margin: 10px auto; 
+                width: 80%; border-radius: 5px; font-weight: bold; display: none; 
+            }
+
+            .logs { height: 250px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #111; margin-bottom: 20px; font-size: 12px; color: #ccc; }
+            
+            #video-section { 
+                display:none; 
+                margin: 20px auto; 
+                border: 3px solid #00e676; 
+                padding:15px; 
+                background: #111;
+                width: fit-content;
+                border-radius: 10px;
+            }
+
+            .stats { 
+                background: #1a1a1a; 
+                padding: 15px; 
+                margin: 20px auto; 
+                width: 80%; 
+                border-radius: 5px;
+                border: 2px solid #00e676;
+            }
+            
+            .stats h3 { margin: 0 0 10px 0; color: #00e676; }
+            .stats p { margin: 5px 0; font-size: 16px; }
+
+            .gallery { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-top: 20px; }
+            .gallery img { height: 60px; border: 1px solid #333; opacity: 0.9; }
+            .gallery img:hover { height: 150px; border-color: white; z-index:999; transition: 0.1s; }
         </style>
     </head>
     <body>
-        <h1>🛠️ HUAWEI MINER (PRO LOGIC)</h1>
-        <button class="btn btn-start" onclick="fetch('/start', {method:'POST'})">🚀 START BOT</button>
-        <button class="btn btn-view" onclick="toggleGallery()">📸 VIEW CAPTURES</button>
-        <div class="logs" id="logs">Waiting...</div>
-        <div id="gallery" class="gallery"></div>
+        <h1>🇷🇺 HUAWEI CAPTCHA COLLECTOR</h1>
+        <p>Automated CAPTCHA Collection System | MongoDB Storage</p>
+        
+        <div>
+            <button id="startStopBtn" onclick="toggleBot()">🚀 START COLLECTION</button>
+            <button onclick="getLiveStatus()" style="background: #2962ff;">📊 LIVE STATUS</button>
+            <button onclick="makeVideo()" style="background: #e91e63;">🎬 GENERATE VIDEO</button>
+            <button onclick="refreshData()" style="background: #009688;">🔄 REFRESH</button>
+        </div>
+
+        <div class="stats" id="stats">
+            <h3>📊 SYSTEM STATUS</h3>
+            <p>Bot Status: <span id="bot-status" style="color: yellow;">IDLE</span></p>
+            <p>CAPTCHAs in Database: <span id="db-count" style="color: #00e676;">Loading...</span></p>
+        </div>
+
+        <div id="status-bar" class="status-bar"></div>
+        
+        <div class="logs" id="logs">Waiting for commands...</div>
+        
+        <div id="video-section">
+            <h3 style="margin-top:0; color: #00e676;">🎬 REPLAY</h3>
+            <video id="v-player" controls width="500" autoplay loop></video>
+        </div>
+
+        <h3>🎞️ FULL HISTORY FEED</h3>
+        <div class="gallery" id="gallery"></div>
+
         <script>
-            let showGal = false;
-            function refresh() {
-                fetch('/status').then(r=>r.json()).then(d=>{
-                    document.getElementById('logs').innerHTML = d.logs.map(l=>`<div>${l}</div>`).join('');
-                    if(showGal) document.getElementById('gallery').innerHTML = d.images.map(i=>`<img src="${i}">`).join('');
+            let isRunning = false;
+
+            function toggleBot() {
+                const btn = document.getElementById('startStopBtn');
+                
+                if (!isRunning) {
+                    fetch('/start', {method: 'POST'}).then(r => r.json()).then(d => {
+                        if (d.status === "started") {
+                            isRunning = true;
+                            btn.textContent = "🛑 STOP COLLECTION";
+                            btn.style.background = "#d32f2f";
+                            document.getElementById('bot-status').textContent = "RUNNING";
+                            document.getElementById('bot-status').style.color = "#00e676";
+                            logUpdate(">>> COLLECTION STARTED...");
+                        } else {
+                            alert(d.message || "Failed to start");
+                        }
+                    });
+                } else {
+                    fetch('/stop', {method: 'POST'}).then(r => r.json()).then(d => {
+                        isRunning = false;
+                        btn.textContent = "🚀 START COLLECTION";
+                        btn.style.background = "#6200ea";
+                        document.getElementById('bot-status').textContent = "STOPPED";
+                        document.getElementById('bot-status').style.color = "red";
+                        logUpdate(">>> COLLECTION STOPPED");
+                    });
+                }
+            }
+
+            function getLiveStatus() {
+                fetch('/live_status').then(r => r.json()).then(d => {
+                    document.getElementById('db-count').textContent = d.captcha_count;
+                    document.getElementById('bot-status').textContent = d.bot_running ? "RUNNING" : "IDLE";
+                    document.getElementById('bot-status').style.color = d.bot_running ? "#00e676" : "yellow";
+                    
+                    const status = document.getElementById('status-bar');
+                    status.style.display = 'block';
+                    status.style.color = "#00e676";
+                    status.innerText = `✅ Database: ${d.captcha_count} CAPTCHAs | Bot: ${d.bot_running ? "RUNNING" : "IDLE"}`;
+                    setTimeout(() => { status.style.display = 'none'; }, 5000);
                 });
             }
-            function toggleGallery() {
-                showGal = !showGal;
-                document.getElementById('gallery').style.display = showGal ? 'flex' : 'none';
-                refresh();
+            
+            function refreshData() {
+                fetch('/status').then(r=>r.json()).then(d=>{
+                    document.getElementById('logs').innerHTML = d.logs.map(l=>`<div>${l}</div>`).join('');
+                    document.getElementById('gallery').innerHTML = d.images.map(i=>`<img src="${i}">`).join('');
+                });
+                getLiveStatus();
             }
-            setInterval(refresh, 3000);
+
+            function makeVideo() {
+                var status = document.getElementById('status-bar');
+                status.style.display = 'block';
+                status.innerText = "⏳ PROCESSING FRAMES... PLEASE WAIT...";
+                status.style.color = "yellow";
+
+                fetch('/generate_video', {method: 'POST'}).then(r=>r.json()).then(d=>{
+                    if(d.status === "done") {
+                        status.innerText = "✅ VIDEO READY! PLAYING BELOW...";
+                        status.style.color = "#00e676";
+                        
+                        var vSection = document.getElementById('video-section');
+                        vSection.style.display = 'block';
+                        
+                        var player = document.getElementById('v-player');
+                        player.src = "/captures/proof.mp4?t=" + Date.now();
+                        player.load();
+                        player.play();
+                    } else {
+                        status.innerText = "❌ ERROR: " + d.error;
+                        status.style.color = "red";
+                    }
+                });
+            }
+
+            function logUpdate(msg) { 
+                document.getElementById('logs').innerHTML = "<div>" + msg + "</div>" + document.getElementById('logs').innerHTML; 
+            }
+            
+            // Auto-refresh every 5 seconds
+            setInterval(refreshData, 5000);
+            
+            // Initial load
+            getLiveStatus();
         </script>
     </body>
     </html>
@@ -91,114 +270,259 @@ async def dashboard():
 
 @app.get("/status")
 async def get_status():
-    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'), key=os.path.getmtime, reverse=True)[:50]
+    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'), key=os.path.getmtime, reverse=True)
     urls = [f"/captures/{os.path.basename(f)}" for f in files]
     return JSONResponse({"logs": logs, "images": urls})
 
+@app.get("/live_status")
+async def live_status():
+    count = get_captcha_count()
+    return JSONResponse({
+        "captcha_count": count,
+        "bot_running": bot_running,
+        "timestamp": datetime.now().isoformat()
+    })
+
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    bt.add_task(run_pro_mining)
+    global bot_running, stop_requested
+    
+    if bot_running:
+        return {"status": "error", "message": "Bot is already running"}
+    
+    bot_running = True
+    stop_requested = False
+    bt.add_task(run_collection_loop)
     return {"status": "started"}
 
-# --- HELPERS ---
-async def burst_record(page, desc, seconds=2):
-    """Captures frames at high speed to show activity"""
-    frames = int(seconds / 0.2)
-    for i in range(frames):
-        ts = datetime.now().strftime("%H%M%S%f")
-        await page.screenshot(path=f"{CAPTURE_DIR}/{ts}_{desc}.jpg")
-        await asyncio.sleep(0.2)
+@app.post("/stop")
+async def stop_bot():
+    global stop_requested
+    stop_requested = True
+    log_msg("🛑 Stop requested by user...")
+    return {"status": "stopped"}
+
+@app.post("/generate_video")
+async def trigger_video():
+    files = sorted(glob.glob(f'{CAPTURE_DIR}/*.jpg'))
+    if not files: return {"status": "error", "error": "No images found"}
+    
+    try:
+        with imageio.get_writer(VIDEO_PATH, fps=15, format='FFMPEG', quality=8) as writer:
+            for filename in files:
+                try:
+                    img = imageio.imread(filename)
+                    writer.append_data(img)
+                except:
+                    continue
+        return {"status": "done"}
+    except Exception as e:
+        print(f"Video Error: {e}")
+        return {"status": "error", "error": str(e)}
 
 async def visual_tap(page, element, desc):
-    """Logs and taps the element"""
     try:
-        if await element.count() > 0:
-            box = await element.bounding_box()
-            if box:
-                x = box['x'] + box['width'] / 2
-                y = box['y'] + box['height'] / 2
-                log_msg(f"👆 Tapping {desc}...")
-                await page.touchscreen.tap(x, y)
-                return True
-    except: pass
+        await element.scroll_into_view_if_needed()
+        box = await element.bounding_box()
+        if box:
+            x = box['x'] + box['width'] / 2
+            y = box['y'] + box['height'] / 2
+            await page.evaluate(f"""
+                var dot = document.createElement('div');
+                dot.style.position = 'absolute'; 
+                dot.style.left = '{x}px'; 
+                dot.style.top = '{y}px';
+                dot.style.width = '20px'; 
+                dot.style.height = '20px'; 
+                dot.style.background = 'red';
+                dot.style.borderRadius = '50%'; 
+                dot.style.zIndex = '999999'; 
+                dot.style.border = '2px solid yellow';
+                document.body.appendChild(dot);
+            """)
+            log_msg(f"👆 Tapping {desc}...")
+            await page.touchscreen.tap(x, y)
+            return True
+    except: 
+        pass
     return False
 
-# --- PRO MINING FLOW ---
-async def run_pro_mining():
-    while True:
-        current_number = generate_russia_number()
-        log_msg(f"🎬 CYCLE START | Number: {current_number}")
+async def burst_wait(page, seconds, step_name):
+    log_msg(f"📸 Recording {step_name} ({seconds}s)...")
+    frames = int(seconds / 0.1)
+    for i in range(frames):
+        ts = datetime.now().strftime("%H%M%S%f")
+        filename = f"{ts}_{step_name}.jpg"
+        await page.screenshot(path=f"{CAPTURE_DIR}/{filename}")
+        await asyncio.sleep(0.1)
+
+# --- MAIN COLLECTION LOOP ---
+async def run_collection_loop():
+    global bot_running, stop_requested
+    
+    numbers = load_numbers()
+    if not numbers:
+        log_msg("❌ No numbers found in numbers.txt")
+        bot_running = False
+        return
+    
+    number_index = 0
+    
+    while not stop_requested:
+        current_number = numbers[number_index]
+        log_msg(f"🎬 Starting Session {number_index + 1} | Number: {current_number}")
         
-        async with async_playwright() as p:
-            pixel_5 = p.devices['Pixel 5'].copy()
-            browser = await p.chromium.launch(headless=True, args=["--no-sandbox"], proxy=PROXY_CONFIG)
-            context = await browser.new_context(**pixel_5)
-            page = await context.new_page()
+        success = await run_single_session(current_number)
+        
+        # Move to next number
+        number_index += 1
+        if number_index >= len(numbers):
+            log_msg("🔄 All numbers processed, restarting from beginning...")
+            number_index = 0
+        
+        if stop_requested:
+            break
+        
+        # Small delay between sessions
+        await asyncio.sleep(2)
+    
+    bot_running = False
+    log_msg("✅ Collection loop stopped")
 
-            try:
-                log_msg("🚀 Navigating to Huawei...")
-                await page.goto(BASE_URL, timeout=60000)
-                await burst_record(page, "01_loaded")
+async def run_single_session(phone_number):
+    """Run a single session for one phone number"""
+    
+    async with async_playwright() as p:
+        pixel_5 = p.devices['Pixel 5'].copy()
+        pixel_5['user_agent'] = "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.101 Mobile Safari/537.36"
+        pixel_5['viewport'] = {'width': 412, 'height': 950} 
 
-                # Register
-                reg = page.get_by_text("Register", exact=True).first
-                if await reg.count() == 0: reg = page.get_by_role("button", name="Register").first
-                if await visual_tap(page, reg, "Register"):
-                    await burst_record(page, "02_reg_clicked", 3)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+            proxy=PROXY_CONFIG
+        )
 
-                    # Agree
-                    agree = page.get_by_text("Agree", exact=True).first
-                    if await agree.count() == 0: agree = page.get_by_text("Next", exact=True).first
-                    if await visual_tap(page, agree, "Agree/Next"):
-                        await burst_record(page, "03_agreed", 3)
+        context = await browser.new_context(**pixel_5, locale="en-US")
+        page = await context.new_page()
 
-                        # DOB Scroll
-                        log_msg("🖱️ Scrolling DOB...")
-                        await page.mouse.move(200, 500); await page.mouse.down()
-                        await page.mouse.move(200, 800, steps=10); await page.mouse.up()
-                        dob_next = page.get_by_text("Next", exact=True).first
-                        await visual_tap(page, dob_next, "DOB_Next")
-                        await burst_record(page, "04_dob_done", 2)
+        try:
+            log_msg("🚀 Navigating...")
+            await page.goto(BASE_URL, timeout=90000)
+            await burst_wait(page, 3, "01_loaded")
+            
+            # Cookie
+            cookie_close = page.locator(".cookie-close-btn").first
+            if await cookie_close.count() == 0: 
+                cookie_close = page.get_by_text("Accept", exact=True).first
+            if await cookie_close.count() > 0: 
+                await visual_tap(page, cookie_close, "Cookie")
+            
+            # Register
+            reg_btn = page.get_by_text("Register", exact=True).first
+            if await reg_btn.count() == 0: 
+                reg_btn = page.get_by_role("button", name="Register").first
+            if await reg_btn.count() > 0:
+                await visual_tap(page, reg_btn, "Register")
+                await burst_wait(page, 3, "02_reg_click")
+            
+            # Terms
+            agree_text = page.get_by_text("Huawei ID User Agreement").first
+            if await agree_text.count() > 0: 
+                await visual_tap(page, agree_text, "Terms")
+            
+            agree_btn = page.get_by_text("Agree", exact=True).first
+            if await agree_btn.count() == 0: 
+                agree_btn = page.get_by_text("Next", exact=True).first
+            if await agree_btn.count() > 0:
+                await visual_tap(page, agree_btn, "Agree_Next")
+                await burst_wait(page, 3, "03_terms_done")
 
-                        # Phone
-                        use_phone = page.get_by_text("Use phone number", exact=False).first
-                        if await visual_tap(page, use_phone, "Use_Phone"):
-                            await burst_record(page, "05_phone_page", 2)
+            # DOB
+            await page.mouse.move(200, 500)
+            await page.mouse.down()
+            await page.mouse.move(200, 800, steps=20)
+            await page.mouse.up()
+            dob_next = page.get_by_text("Next", exact=True).first
+            if await dob_next.count() > 0: 
+                await visual_tap(page, dob_next, "DOB_Next")
+            await burst_wait(page, 2, "04_dob_done")
 
-                            # Russia Switch
-                            hk = page.get_by_text("Hong Kong").first
-                            if await visual_tap(page, hk, "Country_List"):
-                                await asyncio.sleep(2)
-                                await page.keyboard.type("Russia", delay=100)
-                                rus = page.get_by_text("Russia", exact=False).first
-                                await visual_tap(page, rus, "Russia_Select")
-                                await burst_record(page, "06_russia_set", 3)
+            # Phone Option
+            use_phone = page.get_by_text("Use phone number", exact=False).first
+            if await use_phone.count() > 0: 
+                await visual_tap(page, use_phone, "Use_Phone")
+            await burst_wait(page, 2, "05_phone_screen")
 
-                                # Input
-                                inp = page.locator("input[type='tel']").first
-                                if await visual_tap(page, inp, "Input_Field"):
-                                    await page.keyboard.type(current_number)
-                                    await page.touchscreen.tap(350, 100) # Close KB
-                                    
-                                    get_code = page.get_by_text("Get code").first
-                                    if await visual_tap(page, get_code, "GET_CODE"):
-                                        log_msg("⏳ Waiting for Captcha...")
-                                        await burst_record(page, "07_captcha_wait", 10)
-                                        
-                                        # SAVE DATASET
-                                        for frame in page.frames:
-                                            if await frame.get_by_text("swap 2 tiles").count() > 0:
-                                                log_msg("🎉 CAPTCHA FOUND! Saving...")
-                                                ts = int(time.time())
-                                                fname = f"captcha_{ts}.jpg"
-                                                await frame.screenshot(path=f"{DATASET_DIR}/{fname}")
-                                                await collection.insert_one({"filename": fname, "number": current_number})
+            # --- COUNTRY SWITCH ---
+            log_msg("🌍 Switching to RUSSIA...")
+            hk_selector = page.get_by_text("Hong Kong").first
+            if await hk_selector.count() == 0: 
+                hk_selector = page.get_by_text("Country/Region").first
+            
+            if await hk_selector.count() > 0:
+                await visual_tap(page, hk_selector, "Country_Selector")
+                await burst_wait(page, 2, "06_list_opened")
+                
+                if await page.locator("input").count() > 0:
+                    search_box = page.locator("input").first
+                    await visual_tap(page, search_box, "Search_Box")
+                    
+                    log_msg("⌨️ Typing Russia...")
+                    await page.keyboard.type("Russia", delay=100)
+                    await burst_wait(page, 2, "07_typed")
 
-                await browser.close()
-                log_msg("💤 Cycle Finished. Sleeping 10s...")
-                await asyncio.sleep(10)
+                    target = page.get_by_text("Russia", exact=False).first
+                    if await target.count() > 0:
+                        await visual_tap(page, target, "Select_Russia")
+                        await burst_wait(page, 3, "08_russia_set")
+                    else:
+                        log_msg("❌ Russia not found")
+            
+            # INPUT & CODE
+            inp = page.locator("input[type='tel']").first
+            if await inp.count() == 0: 
+                inp = page.locator("input").first
+            
+            if await inp.count() > 0:
+                await visual_tap(page, inp, "Input")
+                for char in phone_number:
+                    await page.keyboard.type(char)
+                    await asyncio.sleep(0.1)
+                
+                await page.touchscreen.tap(350, 100)
+                await burst_wait(page, 1, "09_ready")
+                
+                get_code = page.locator(".get-code-btn").first
+                if await get_code.count() == 0: 
+                    get_code = page.get_by_text("Get code", exact=False).first
+                
+                if await get_code.count() > 0:
+                    await visual_tap(page, get_code, "GET CODE")
+                    log_msg("⏳ Waiting for CAPTCHA...")
+                    await burst_wait(page, 10, "10_waiting_captcha")
 
-            except Exception as e:
-                log_msg(f"❌ Error: {str(e)}")
-                await browser.close()
-                await asyncio.sleep(5)
+                    # CHECK FOR CAPTCHA AND SAVE TO DB
+                    if len(page.frames) > 1:
+                        log_msg("🧩 CAPTCHA DETECTED! Capturing...")
+                        
+                        # Take CAPTCHA screenshot
+                        captcha_filename = f"{CAPTURE_DIR}/captcha_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                        await page.screenshot(path=captcha_filename)
+                        
+                        # Save to MongoDB
+                        session_info = f"Session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                        save_captcha_to_db(captcha_filename, phone_number, session_info)
+                        
+                        await burst_wait(page, 3, "11_captcha_saved")
+                        log_msg(f"✅ CAPTCHA saved for {phone_number}")
+                    else:
+                        log_msg("❓ No CAPTCHA frame detected")
+
+            await browser.close()
+            return True
+
+        except Exception as e:
+            log_msg(f"❌ Error in session: {str(e)}")
+            await browser.close()
+            return False

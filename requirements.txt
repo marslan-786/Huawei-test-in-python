@@ -9,4 +9,5 @@ numpy
 scipy
 pytweening
 pyautogui
-motor
+pymongo
+python-multipart
