@@ -1,8 +1,7 @@
-# Python 3.11 Base Image
+# Base Image Python 3.11
 FROM python:3.11-bookworm
 
-# 1. Install System Dependencies (FFmpeg + Browsers Support)
-# FIX: 'librandr2' ki jagah 'libxrandr2' kar diya hai
+# 1. System Dependencies (FFmpeg + Browsers Support)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libnss3 \
@@ -24,9 +23,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# 2. Install Python Libraries
+# 2. Python Libraries Install
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -U -r requirements.txt
 
 # 3. Install Playwright Browsers (The AI Eyes)
 RUN playwright install chromium
@@ -35,8 +34,9 @@ RUN playwright install-deps
 # 4. Copy Code
 COPY . .
 
-# 5. Permissions
+# 5. Create Captures Folder & Permissions
 RUN mkdir -p captures && chmod 777 captures
 
-# 6. RUN COMMAND (Railway Port Fix)
+# 6. RUN COMMAND (Railway Port Variable Fix)
+# Ye line Railway k $PORT ko automatic utha legi.
 CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"
