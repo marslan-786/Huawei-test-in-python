@@ -1,5 +1,7 @@
 fastapi
 uvicorn
 playwright
-aiofiles
+google-generativeai
 python-dotenv
+aiofiles
+pillow
