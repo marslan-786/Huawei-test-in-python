@@ -4,6 +4,8 @@ FROM python:3.11-bookworm
 # Hum heavy dependencies daal rahe hain taake browser crash na ho
 RUN apt-get update && apt-get install -y \
     chromium \
+    ffmpeg \
+    libnss3 \
     libnss3 \
     libnspr4 \
     libatk1.0-0 \

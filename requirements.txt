@@ -3,3 +3,4 @@ uvicorn
 playwright
 python-dotenv
 aiofiles
+imageio[ffmpeg]
