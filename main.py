@@ -154,6 +154,7 @@ async def dashboard():
         <div>
             <button id="startStopBtn" onclick="toggleBot()">🚀 START COLLECTION</button>
             <button onclick="getLiveStatus()" style="background: #2962ff;">📊 LIVE STATUS</button>
+            <button onclick="window.location.href='/database_captchas'" style="background: #ff6f00;">📦 VIEW DATABASE</button>
             <button onclick="makeVideo()" style="background: #e91e63;">🎬 GENERATE VIDEO</button>
             <button onclick="refreshData()" style="background: #009688;">🔄 REFRESH</button>
         </div>
@@ -302,6 +303,66 @@ async def stop_bot():
     stop_requested = True
     log_msg("🛑 Stop requested by user...")
     return {"status": "stopped"}
+
+@app.get("/database_captchas", response_class=HTMLResponse)
+async def view_database_captchas():
+    """View all CAPTCHAs stored in MongoDB"""
+    if captcha_collection is None:
+        return "<h1>❌ MongoDB not connected</h1>"
+    
+    try:
+        # Get all captchas from database
+        captchas = list(captcha_collection.find().sort("timestamp", -1).limit(100))
+        
+        html_content = """
+        <html>
+        <head>
+            <title>Database CAPTCHAs</title>
+            <style>
+                body { background: #000; color: #00e676; font-family: monospace; padding: 20px; }
+                h1 { text-align: center; }
+                .captcha-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-top: 30px; }
+                .captcha-card { background: #1a1a1a; border: 2px solid #00e676; border-radius: 10px; padding: 15px; }
+                .captcha-card img { width: 100%; border-radius: 5px; }
+                .captcha-info { margin-top: 10px; font-size: 12px; }
+                .captcha-info p { margin: 5px 0; }
+                .back-btn { display: block; width: 200px; margin: 20px auto; padding: 10px; text-align: center; background: #6200ea; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; }
+            </style>
+        </head>
+        <body>
+            <h1>📦 DATABASE CAPTCHAs (Latest 100)</h1>
+            <a href="/" class="back-btn">← Back to Dashboard</a>
+            <div class="captcha-grid">
+        """
+        
+        for captcha in captchas:
+            # Convert binary image to base64
+            img_base64 = base64.b64encode(captcha['image']).decode('utf-8')
+            timestamp = captcha['timestamp'].strftime("%Y-%m-%d %H:%M:%S")
+            phone = captcha.get('phone_number', 'N/A')
+            session = captcha.get('session_info', 'N/A')
+            
+            html_content += f"""
+            <div class="captcha-card">
+                <img src="data:image/jpeg;base64,{img_base64}" alt="CAPTCHA">
+                <div class="captcha-info">
+                    <p>📱 <strong>Phone:</strong> {phone}</p>
+                    <p>🕒 <strong>Time:</strong> {timestamp}</p>
+                    <p>📋 <strong>Session:</strong> {session}</p>
+                </div>
+            </div>
+            """
+        
+        html_content += """
+            </div>
+        </body>
+        </html>
+        """
+        
+        return html_content
+        
+    except Exception as e:
+        return f"<h1>❌ Error: {str(e)}</h1>"
 
 @app.post("/generate_video")
 async def trigger_video():
