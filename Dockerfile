@@ -1,7 +1,9 @@
 FROM python:3.11-bookworm
 
+# 1. Install System Deps & Chromium
 RUN apt-get update && apt-get install -y \
-    ffmpeg \
+    chromium \
+    chromium-driver \
     libnss3 \
     libnspr4 \
     libatk1.0-0 \
@@ -18,16 +20,18 @@ RUN apt-get update && apt-get install -y \
     libpango-1.0-0 \
     libcairo2 \
     fonts-liberation \
-    fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -U -r requirements.txt
-RUN playwright install chromium
-RUN playwright install-deps
 
+# 2. Copy Code
 COPY . .
 RUN mkdir -p captures && chmod 777 captures
+
+# 3. Env Variables for DrissionPage to find Chromium
+ENV CHROME_BIN=/usr/bin/chromium
+ENV CHROMIUM_PATH=/usr/bin/chromium
 
 CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"
