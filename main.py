@@ -2,18 +2,20 @@ import os
 import glob
 import asyncio
 import json
+import base64
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from playwright.async_api import async_playwright
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from PIL import Image
 
 # --- CONFIGURATION ---
 TARGET_PHONE = "3177635849"
 CAPTURE_DIR = "./captures"
-# 👇 YAHAN KEY DALEIN
+# 👇 YAHAN APNI KEY DALEIN
 API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyCz-X24ZgEZ79YRcg8ym9ZtuQHup1AVgJQ")
 
 app = FastAPI()
@@ -29,88 +31,57 @@ def log_msg(message):
     logs.insert(0, entry)
     if len(logs) > 100: logs.pop()
 
-# --- SMART MODEL SELECTION (PRO FIRST) ---
-active_model = None
+# --- SMART CLIENT SETUP ---
+client = None
+model_id = "gemini-2.0-flash" # Trying the latest standard
 
-def configure_model():
-    global active_model
+def configure_client():
+    global client, model_id
     try:
-        genai.configure(api_key=API_KEY)
-        log_msg("🔍 Scanning for PRO Vision Models...")
-        
-        # Get all models available to your API Key
-        all_models = list(genai.list_models())
-        
-        # Priority: PRO > LATEST PRO > FLASH (Fallback)
-        priority_names = [
-            "gemini-1.5-pro",          # First Choice (Best)
-            "gemini-1.5-pro-latest",   # Second Choice
-            "gemini-1.5-pro-001",      # Older Pro
-            "gemini-pro-vision",       # Legacy Pro
-            "gemini-1.5-flash"         # Fallback only
-        ]
-        
-        chosen_name = None
-        
-        # 1. Check Priority List
-        for p in priority_names:
-            for m in all_models:
-                if p in m.name:
-                    chosen_name = m.name
-                    break
-            if chosen_name: break
-            
-        # 2. Fallback: Any model that supports Vision
-        if not chosen_name:
-            for m in all_models:
-                if 'vision' in m.supported_generation_methods:
-                    chosen_name = m.name
-                    break
-        
-        if chosen_name:
-            log_msg(f"✅ Connected to POWER MODEL: {chosen_name}")
-            active_model = genai.GenerativeModel(chosen_name)
-        else:
-            log_msg("❌ CRITICAL: No suitable Vision model found!")
-            
+        client = genai.Client(api_key=API_KEY)
+        log_msg("✅ Google GenAI Client Initialized")
+        # We will let the code try models dynamically if needed, 
+        # but defaulting to 2.0-flash is safer now.
     except Exception as e:
-        log_msg(f"❌ API Connection Failed: {e}")
+        log_msg(f"❌ Client Init Error: {e}")
 
 # --- DASHBOARD ---
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     return """
+    <!DOCTYPE html>
     <html>
     <head>
+        <title>Huawei Vision AI 2.0</title>
         <style>
-            body { background: #111; color: #00e676; font-family: monospace; padding: 20px; text-align: center; }
-            .box { border: 1px solid #444; padding: 10px; margin: 10px auto; max-width: 900px; background: #222; }
-            button { padding: 10px 20px; font-weight: bold; cursor: pointer; border:none; margin: 5px; border-radius: 4px; }
+            body { background: #050505; color: #00e676; font-family: monospace; padding: 20px; text-align: center; }
+            .box { border: 1px solid #333; padding: 15px; margin: 15px auto; max-width: 850px; background: #111; border-radius: 8px; }
+            button { padding: 12px 25px; font-weight: bold; cursor: pointer; border:none; margin: 5px; border-radius: 5px; font-size: 16px; }
             .btn-blue { background: #2979ff; color: white; }
-            .btn-red { background: #ff1744; color: white; }
+            .btn-red { background: #d50000; color: white; }
             .logs { 
-                height: 350px; overflow-y: auto; text-align: left; 
-                border: 1px solid #555; padding: 10px; color: #ccc; 
-                background: black; font-size: 13px; white-space: pre-wrap;
+                height: 400px; overflow-y: auto; text-align: left; 
+                border: 1px solid #444; padding: 15px; color: #ddd; 
+                background: black; font-size: 14px; white-space: pre-wrap;
             }
-            .gallery img { height: 120px; border: 1px solid #666; margin: 5px; }
+            .gallery img { height: 140px; border: 2px solid #555; margin: 5px; border-radius: 4px; }
         </style>
     </head>
     <body>
-        <h1>💎 HUAWEI PRO AGENT (Gemini 1.5 Pro)</h1>
+        <h1>👁️ GEMINI 2.0 VISION AGENT</h1>
         
         <div class="box">
             <button class="btn-blue" onclick="refreshData()">🔄 Refresh Logs</button>
-            <button class="btn-red" onclick="startBot()">🚀 Launch PRO Mission</button>
+            <button class="btn-red" onclick="startBot()">🚀 Launch Mission</button>
         </div>
 
-        <div class="box logs" id="logs">System Standby...</div>
+        <div class="box logs" id="logs">System Ready. Waiting for launch...</div>
         <div class="box gallery" id="gallery"></div>
 
         <script>
             function startBot() {
                 fetch('/start', {method: 'POST'});
-                document.getElementById('logs').innerHTML = ">>> INITIALIZING PRO ENGINE...\n" + document.getElementById('logs').innerHTML;
+                document.getElementById('logs').innerHTML = ">>> INITIALIZING...\n" + document.getElementById('logs').innerHTML;
                 setTimeout(refreshData, 3000);
             }
 
@@ -134,32 +105,43 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    configure_model() 
+    configure_client() 
     log_msg(">>> COMMAND RECEIVED: Start Sequence")
     bt.add_task(run_agent)
     return {"status": "started"}
 
-# --- VISION FUNCTIONS ---
+# --- VISION FUNCTIONS (Updated for New Library) ---
 async def ask_gemini(image_path, prompt):
-    if not active_model:
-        log_msg("❌ Model not initialized!")
+    if not client:
+        log_msg("❌ Client not initialized!")
         return None
     try:
-        img = Image.open(image_path)
-        # Using Pro model needs slightly cleaner prompts
-        response = active_model.generate_content([prompt, img])
+        # Load Image
+        image = Image.open(image_path)
+        
+        full_prompt = f"""
+        Look at this mobile screenshot. I need to tap the UI element: "{prompt}".
+        
+        Return valid JSON ONLY with 'x' and 'y' coordinates of the center.
+        Example: {{"x": 150, "y": 400}}
+        """
+
+        # Generate using the new library syntax
+        response = client.models.generate_content(
+            model=model_id,
+            contents=[full_prompt, image],
+            config=types.GenerateContentConfig(
+                temperature=0.1
+            )
+        )
+        
         return response.text.replace("```json", "").replace("```", "").strip()
     except Exception as e:
         log_msg(f"⚠️ API Error: {e}")
         return None
 
 async def get_coordinates(image_path, element):
-    prompt = f"""
-    Analyze the UI screenshot accurately. Find the element: "{element}".
-    Return valid JSON ONLY with 'x' and 'y' (center coordinates).
-    Example: {{"x": 100, "y": 200}}
-    """
-    res = await ask_gemini(image_path, prompt)
+    res = await ask_gemini(image_path, element)
     try:
         data = json.loads(res)
         return data['x'], data['y']
@@ -167,10 +149,7 @@ async def get_coordinates(image_path, element):
         return None, None
 
 async def verify_screen(image_path, verification_clue):
-    prompt = f"""
-    Look at this screenshot. Do you see "{verification_clue}" clearly visible?
-    Return valid JSON ONLY: {{"found": true}} or {{"found": false}}.
-    """
+    prompt = f"Can you clearly see '{verification_clue}' in this image? Return JSON: {{'found': true}} or {{'found': false}}"
     res = await ask_gemini(image_path, prompt)
     try:
         return json.loads(res).get("found", False)
@@ -180,6 +159,7 @@ async def verify_screen(image_path, verification_clue):
 # --- MAIN LOGIC ---
 async def run_agent():
     try:
+        # Cleanup
         for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
 
         async with async_playwright() as p:
@@ -194,11 +174,11 @@ async def run_agent():
 
             log_msg("Navigating...")
             await page.goto("https://id5.cloud.huawei.com/CAS/mobile/standard/register/wapRegister.html?reqClientType=7&loginChannel=7000000&regionCode=hk&loginUrl=https%3A%2F%2Fid5.cloud.huawei.com%2FCAS%2Fmobile%2Fstandard%2FwapLogin.html&lang=en-us&themeName=huawei#/wapRegister/regByPhone")
-            await asyncio.sleep(6)
+            await asyncio.sleep(8)
 
             # --- SMART ACTION FUNCTION ---
             async def smart_click_verify(target_desc, verification_clue, step_name):
-                log_msg(f"🔵 Attempting Step: {step_name}")
+                log_msg(f"🔵 Attempting: {step_name}")
                 
                 for attempt in range(1, 4):
                     path = f"{CAPTURE_DIR}/{step_name}_try{attempt}.jpg"
@@ -219,7 +199,7 @@ async def run_agent():
                         
                         await page.mouse.click(x, y)
                         log_msg(f"   Click at {x},{y}")
-                        await asyncio.sleep(4)
+                        await asyncio.sleep(5) # Thora extra time diya hai
                         
                         # Verify
                         v_path = f"{CAPTURE_DIR}/{step_name}_verify_{attempt}.jpg"
@@ -237,36 +217,40 @@ async def run_agent():
 
             # --- FLOW ---
             
-            # Step 1: Open Menu (Using Arrow)
+            # Step 1: Open Menu (Arrow targeting)
             if not await smart_click_verify(
                 "The small arrow icon > on the right side of the Country/Region row", 
                 "Search", 
                 "01_open_menu"
             ): return
 
+            # Step 2: Search Click (Important for mobile)
+            log_msg("Focusing Search Bar...")
+            await page.mouse.click(100, 150) # Approx top area click
+            await asyncio.sleep(1)
+            
             log_msg("Typing 'Pakistan'...")
-            # Focus search bar
-            await page.mouse.click(100, 100) 
             await page.keyboard.type("Pakistan", delay=100)
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
             await page.screenshot(path=f"{CAPTURE_DIR}/02_typed.jpg")
 
-            # Step 2: Select Pakistan
+            # Step 3: Select Pakistan
             if not await smart_click_verify(
                 "The text 'Pakistan +92' in the list", 
                 "+92", 
                 "03_select_pak"
             ): return
 
+            # Step 4: Phone Input
             log_msg("Typing Phone Number...")
-            # Step 3: Focus Phone Input explicitly
+            # Direct coordinates approach for input usually works better if AI fails verify
             x, y = await get_coordinates(f"{CAPTURE_DIR}/03_select_pak_verify_1.jpg", "Phone number input field")
             if x: await page.mouse.click(x, y)
             
             await page.keyboard.type(TARGET_PHONE, delay=100)
             await page.screenshot(path=f"{CAPTURE_DIR}/04_filled.jpg")
 
-            # Step 4: Get Code
+            # Step 5: Get Code
             await smart_click_verify("The 'Get code' button", "sent", "05_get_code")
 
             log_msg("✅ Workflow Finished.")
