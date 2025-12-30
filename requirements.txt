@@ -1,7 +1,8 @@
 fastapi
 uvicorn
-browser-use==0.1.4
+browser-use
 langchain-google-genai
 playwright
 python-dotenv
 aiofiles
+pydantic>=2.0
