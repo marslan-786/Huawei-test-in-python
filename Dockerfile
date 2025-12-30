@@ -1,29 +1,25 @@
 FROM python:3.11-bookworm
 
-# 1. Install Desktop Environment & Chrome
+# 1. Install System Tools (Desktop & Chrome)
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     chromium \
     xvfb \
     x11vnc \
     fluxbox \
     novnc \
-    net-tools \
     supervisor \
+    net-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Environment Variables
+# 2. Setup Environment
 ENV DISPLAY=:0
 ENV RESOLUTION=1280x720
 
-# 3. Setup Workspace
 WORKDIR /app
 
-# 4. Copy Start Scripts
+# 3. Copy Config
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-COPY start.sh .
 
-# 5. Permissions
-RUN chmod +x start.sh
-
-# 6. Start Command (Supervisor runs everything)
+# 4. Start Command
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
