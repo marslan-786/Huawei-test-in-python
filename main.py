@@ -14,8 +14,8 @@ CAPTURE_DIR = "./captures"
 VIDEO_PATH = f"{CAPTURE_DIR}/proof.mp4"
 NUMBERS_FILE = "numbers.txt"
 
-# 📱 MOBILE LINK (The Golden Link)
-MAGIC_URL = "https://id5.cloud.huawei.com/CAS/mobile/standard/register/wapRegister.html#/wapRegister/regByPhone?countryCode=ru&regionCode=ru&lang=en-us"
+# 📱 MOBILE LINK
+MAGIC_URL = "https://id5.cloud.huawei.com/CAS/mobile/standard/register/wapRegister.html#/wapRegister/regByPhone"
 
 # 👇 PROXY CONFIG 👇
 PROXY_CONFIG = {
@@ -54,28 +54,28 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Chrome Clone</title>
+        <title>Huawei Deep Stealth</title>
         <style>
-            body { background: #fff; color: #333; font-family: sans-serif; padding: 20px; text-align: center; }
-            button { padding: 15px 30px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #4285f4; color: white; border-radius: 4px; }
-            .logs { height: 350px; overflow-y: auto; text-align: left; border: 1px solid #ddd; padding: 10px; background: #f1f1f1; margin-bottom: 20px; font-family: monospace; }
-            .gallery img { height: 250px; border: 4px solid #333; margin: 3px; border-radius: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+            body { background: #000; color: #00e5ff; font-family: monospace; padding: 20px; text-align: center; }
+            button { padding: 15px 30px; font-weight: bold; cursor: pointer; border:none; margin:5px; background: #d50000; color: white; border-radius: 4px; }
+            .logs { height: 350px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #111; margin-bottom: 20px; }
+            .gallery img { height: 250px; border: 2px solid #333; margin: 3px; border-radius: 10px; }
             #video-section { display:none; margin-top:20px; }
         </style>
     </head>
     <body>
-        <h1 style="color: #4285f4;">📱 CHROME MOBILE CLONE</h1>
-        <p>Emulating: Android 13 / Chrome 121 (High Density)</p>
-        <button onclick="startBot()">🚀 START CHROME AGENT</button>
-        <button onclick="refreshData()" style="background: #34a853;">🔄 REFRESH</button>
-        <button onclick="makeVideo()" style="background: #ea4335;">🎬 MAKE VIDEO</button>
+        <h1>🥷 DEEP STEALTH: REGION INJECTOR</h1>
+        <p>Forcing Region: PK | Emulating: Samsung S23 Ultra</p>
+        <button onclick="startBot()">🚀 START DEEP AGENT</button>
+        <button onclick="refreshData()" style="background: #2979ff;">🔄 REFRESH</button>
+        <button onclick="makeVideo()" style="background: #00c853;">🎬 MAKE VIDEO</button>
         
         <div class="logs" id="logs">Waiting...</div>
         <div id="video-section"><video id="v-player" controls height="450"></video></div>
         <div id="gallery"></div>
 
         <script>
-            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> INITIALIZING CHROME EMULATION..."); }
+            function startBot() { fetch('/start', {method: 'POST'}); logUpdate(">>> INJECTING SCRIPT..."); }
             function refreshData() {
                 fetch('/status').then(r=>r.json()).then(d=>{
                     document.getElementById('logs').innerHTML = d.logs.map(l=>`<div>${l}</div>`).join('');
@@ -105,7 +105,7 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    bt.add_task(run_chrome_agent)
+    bt.add_task(run_deep_agent)
     return {"status": "started"}
 
 @app.post("/generate_video")
@@ -118,7 +118,7 @@ async def trigger_video():
         return {"status": "done"}
     except: return {"status": "error"}
 
-# --- VISUAL TAP (Strictly Touch Event) ---
+# --- VISUAL TOUCH ---
 async def visual_tap(page, element, desc):
     try:
         box = await element.bounding_box()
@@ -126,26 +126,23 @@ async def visual_tap(page, element, desc):
             x = box['x'] + box['width'] / 2
             y = box['y'] + box['height'] / 2
             
-            # Visual Marker (Green for Success)
             await page.evaluate(f"""
                 var dot = document.createElement('div');
                 dot.style.position = 'absolute'; left = '{x}px'; top = '{y}px';
-                dot.style.width = '20px'; height = '20px'; background = 'rgba(0, 255, 0, 0.6)';
+                dot.style.width = '20px'; height = '20px'; background = 'rgba(255, 0, 0, 0.5)';
                 dot.style.borderRadius = '50%'; border = '2px solid white'; zIndex = '99999';
                 document.body.appendChild(dot);
             """)
             
             log_msg(f"👆 Tapping {desc}...")
-            # FORCE TAP - No Mouse Click
             await page.touchscreen.tap(x, y)
             await asyncio.sleep(0.5)
             return True
-    except Exception as e:
-        log_msg(f"⚠️ Tap Failed: {str(e)}")
+    except: pass
     return False
 
 # --- MAIN AGENT ---
-async def run_chrome_agent():
+async def run_deep_agent():
     try:
         for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
         
@@ -158,41 +155,63 @@ async def run_chrome_agent():
             log_msg(f"📱 Processing: {current_number}")
 
             async with async_playwright() as p:
-                # 🔥 EXACT CHROME ANDROID CONFIGURATION 🔥
-                # Ye settings Kiwi Browser se alag hain, aur 100% Chrome jaisi hain
-                
+                # 1. ARGS TO HIDE AUTOMATION
+                args = [
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--use-gl=egl",
+                    "--disable-dev-shm-usage",
+                    # Important: Ignore default automation flags
+                    "--disable-infobars",
+                    "--hide-scrollbars",
+                ]
+
                 browser = await p.chromium.launch(
                     headless=True,
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--no-sandbox",
-                        "--use-gl=egl", # Mobile Graphics rendering
-                        "--disable-dev-shm-usage"
-                    ],
-                    proxy=PROXY_CONFIG
+                    args=args,
+                    proxy=PROXY_CONFIG,
+                    # Ignore default playwright args that leak identity
+                    ignore_default_args=["--enable-automation"] 
                 )
 
+                # 2. SAMSUNG S23 ULTRA PROFILE
                 context = await browser.new_context(
-                    # 1. Official User Agent of Chrome on Pixel 5 (Android 13)
-                    user_agent="Mozilla/5.0 (Linux; Android 13; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
-                    
-                    # 2. Viewport (Pixel 5 Exact Size)
-                    viewport={"width": 393, "height": 851},
-                    
-                    # 3. High Pixel Density (Kiwi aksar isko miss karta hai)
+                    user_agent="Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.101 Mobile Safari/537.36",
+                    viewport={"width": 412, "height": 915},
                     device_scale_factor=3.0,
-                    
-                    # 4. Mobile Flags
                     is_mobile=True,
                     has_touch=True,
-                    
-                    timezone_id="America/Los_Angeles",
-                    locale="en-US"
+                    timezone_id="Asia/Karachi", # Force PK Timezone
+                    locale="en-PK"
                 )
                 
+                # 3. FORCE NETWORK HEADERS (Client Hints)
+                # Ye sab se important hai! Huawei ko batata hai k platform Android hai
+                await context.set_extra_http_headers({
+                    "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+                    "sec-ch-ua-mobile": "?1",
+                    "sec-ch-ua-platform": '"Android"',
+                    "Upgrade-Insecure-Requests": "1"
+                })
+
                 page = await context.new_page()
 
-                log_msg("🚀 Loading Huawei (Chrome Mobile View)...")
+                # 4. INJECT REGION & REMOVE WEBDRIVER (Before Page Load)
+                await page.add_init_script("""
+                    // 1. Hide WebDriver
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    
+                    // 2. Force LocalStorage for Region PK
+                    // Huawei uses localStorage keys like 'countryCode', 'regionCode'
+                    try {
+                        localStorage.setItem('countryCode', 'pk');
+                        localStorage.setItem('regionCode', 'pk');
+                        localStorage.setItem('site', 'pk');
+                        localStorage.setItem('lang', 'en-us');
+                    } catch(e) {}
+                """)
+
+                log_msg("🚀 Loading Page (With Injected Region PK)...")
                 try:
                     await page.goto(MAGIC_URL, timeout=60000)
                 except:
@@ -201,7 +220,7 @@ async def run_chrome_agent():
                     continue
 
                 await page.wait_for_load_state("networkidle")
-                await asyncio.sleep(3)
+                await asyncio.sleep(4)
                 await page.screenshot(path=f"{CAPTURE_DIR}/monitor_01_loaded.jpg")
 
                 # FIND INPUT
@@ -211,67 +230,58 @@ async def run_chrome_agent():
                 if await inp.count() > 0:
                     await visual_tap(page, inp, "Input")
                     
-                    # Mobile Keyboard Simulation
+                    # Human Typing
                     for char in current_number:
                         await page.keyboard.type(char)
-                        await asyncio.sleep(0.2)
+                        await asyncio.sleep(random.uniform(0.1, 0.3))
                     
-                    # Tap outside to close keyboard/blur
-                    await page.touchscreen.tap(10, 100)
+                    await page.touchscreen.tap(10, 100) # Blur
                     await page.screenshot(path=f"{CAPTURE_DIR}/monitor_02_typed.jpg")
                 else:
                     log_msg("❌ Input Not Found")
                     await browser.close()
                     continue
 
-                # TRY GET CODE
-                retry_count = 0
+                # GET CODE
+                retry = 0
                 max_retries = 2
                 
-                while retry_count < max_retries:
-                    retry_count += 1
-                    
-                    # Finding Button
+                while retry < max_retries:
+                    retry += 1
                     btn = page.locator(".get-code-btn").first
                     if await btn.count() == 0: btn = page.get_by_text("Get code", exact=False).first
                     
                     if await btn.count() > 0:
-                        # KIWI BROWSER ISSUE FIX:
-                        # Hum 'tap' use kar rahay hain, 'click' nahi.
                         await visual_tap(page, btn, "Get Code")
-                        
-                        log_msg("⏳ Waiting 5s for response...")
+                        log_msg("⏳ Waiting 5s...")
                         await asyncio.sleep(5)
                     else:
-                        log_msg("❌ Button Not Found")
+                        log_msg("❌ Button Lost")
                         break
                     
-                    await page.screenshot(path=f"{CAPTURE_DIR}/monitor_{current_number}_{retry_count}.jpg")
+                    await page.screenshot(path=f"{CAPTURE_DIR}/monitor_{current_number}_{retry}.jpg")
 
-                    # CHECK FOR CAPTCHA (SUCCESS)
-                    # Agar link Chrome Mobile pe chal gaya, to yahan Captcha ana chahiye
+                    # CHECK SUCCESS
                     if len(page.frames) > 1 or await page.locator("iframe").count() > 0:
-                        log_msg("🎉 BINGO! CAPTCHA DETECTED! (Chrome Emulation Worked)")
+                        log_msg("🎉 BINGO! CAPTCHA DETECTED! (Region PK Success)")
                         await page.screenshot(path=f"{CAPTURE_DIR}/monitor_SUCCESS.jpg")
                         await browser.close()
-                        return # SUCCESS!
+                        return
 
                     # CHECK ERROR
                     if await page.get_by_text("Unexpected problem").count() > 0:
-                        log_msg(f"🛑 Blocked on Try {retry_count}")
-                        
-                        ok_btn = page.get_by_text("OK").first
-                        if await ok_btn.count() > 0:
-                            await visual_tap(page, ok_btn, "OK")
+                        log_msg(f"🛑 Blocked on Try {retry}")
+                        ok = page.get_by_text("OK").first
+                        if await ok.count() > 0:
+                            await visual_tap(page, ok, "OK")
                             log_msg("⏳ Waiting 10s...")
                             await asyncio.sleep(10)
-                        else:
-                            await asyncio.sleep(5)
+                        else: await asyncio.sleep(5)
                     else:
-                        log_msg("❓ No response? Retrying...")
+                        log_msg("❓ Checking again...")
                         await asyncio.sleep(2)
 
-                log_msg("❌ Failed. Rotating Number...")
+                log_msg("❌ Rotating...")
                 await browser.close()
 
     except Exception as e:
