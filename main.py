@@ -14,11 +14,8 @@ from PIL import Image
 # --- CONFIGURATION ---
 TARGET_PHONE = "3177635849"
 CAPTURE_DIR = "./captures"
-API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyCz-X24ZgEZ79YRcg8ym9ZtuQHup1AVgJQ") # Yahan Key Dalein
-
-# Setup Gemini
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash') # Flash is faster & cheaper, Pro is smarter
+# 👇 Apni Key Yahan Paste Karein
+API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyCz-X24ZgEZ79YRcg8ym9ZtuQHup1AVgJQ")
 
 app = FastAPI()
 if not os.path.exists(CAPTURE_DIR):
@@ -33,6 +30,48 @@ def log_msg(message):
     print(entry)
     logs.insert(0, entry)
     if len(logs) > 50: logs.pop()
+
+# --- SMART MODEL SETUP ---
+active_model = None
+
+def configure_genai():
+    global active_model
+    try:
+        genai.configure(api_key=API_KEY)
+        log_msg("🔍 Checking available Gemini models...")
+        
+        # List all models
+        available_models = [m.name for m in genai.list_models()]
+        
+        # Priority list (Fastest to Slowest)
+        priority = [
+            "models/gemini-1.5-flash-latest",
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-pro",
+            "models/gemini-pro-vision"
+        ]
+        
+        chosen_model = None
+        for p in priority:
+            if p in available_models:
+                chosen_model = p
+                break
+        
+        if not chosen_model:
+            # Fallback if exact match not found, take first vision model
+            for m in available_models:
+                if "vision" in m or "flash" in m:
+                    chosen_model = m
+                    break
+        
+        if chosen_model:
+            log_msg(f"✅ Connected to Model: {chosen_model}")
+            active_model = genai.GenerativeModel(chosen_model)
+        else:
+            log_msg("❌ ERROR: No suitable Vision model found in your account!")
+            
+    except Exception as e:
+        log_msg(f"❌ API Error: {e}")
 
 # --- DASHBOARD ---
 @app.get("/", response_class=HTMLResponse)
@@ -54,7 +93,7 @@ async def dashboard():
         </style>
     </head>
     <body>
-        <h1>👁️ GEMINI VISION AGENT</h1>
+        <h1>👁️ GEMINI VISION DIRECT (Auto-Fix)</h1>
         <div class="box">
             <button class="btn-refresh" onclick="refresh()">🔄 REFRESH VIEW</button>
             <button class="btn-start" onclick="startBot()">🚀 START VISION AI</button>
@@ -64,7 +103,7 @@ async def dashboard():
         <script>
             function startBot() {
                 fetch('/start', {method: 'POST'});
-                document.getElementById('logs').innerHTML = "<div>>>> AI INITIALIZED...</div>" + document.getElementById('logs').innerHTML;
+                document.getElementById('logs').innerHTML = "<div>>>> START COMMAND SENT...</div>" + document.getElementById('logs').innerHTML;
                 setTimeout(refresh, 2000);
             }
             function refresh() {
@@ -92,127 +131,102 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
+    # Re-configure on every run to ensure connection
+    configure_genai()
+    if not active_model:
+        return {"status": "error", "msg": "No model found"}
+        
     log_msg(">>> Start Command Received")
     bt.add_task(run_vision_agent)
     return {"status": "started"}
 
-# --- AI HELPER FUNCTION ---
-async def ask_gemini_for_coordinates(image_path, element_description):
-    """Sends image to Gemini and asks for X,Y coordinates"""
+# --- AI BRAIN ---
+async def ask_gemini(image_path, element):
+    """Sends screenshot to Gemini and asks for coordinates"""
     try:
-        log_msg(f"🧠 Asking Gemini: Where is '{element_description}'?")
-        
-        # Load Image
+        log_msg(f"🧠 Asking AI to find: '{element}'")
         img = Image.open(image_path)
         
-        # Prompt Engineering
         prompt = f"""
-        Look at this mobile screenshot. I need to click on the UI element described as: "{element_description}".
-        
-        Return the X and Y coordinates of the CENTER of that element.
-        The image size is {img.width}x{img.height}.
-        
-        IMPORTANT: Return ONLY valid JSON format like this: {{"x": 123, "y": 456}}.
-        Do not write any other text.
+        Look at this screenshot. I need to click the UI element: "{element}".
+        Return JSON ONLY with 'x' and 'y' coordinates of the center.
+        Example: {{"x": 150, "y": 400}}
         """
         
-        response = model.generate_content([prompt, img])
-        text = response.text.strip().replace("```json", "").replace("```", "")
+        response = active_model.generate_content([prompt, img])
+        text = response.text.replace("```json", "").replace("```", "").strip()
         
-        coords = json.loads(text)
-        log_msg(f"🎯 Gemini found it at: {coords}")
-        return coords['x'], coords['y']
+        data = json.loads(text)
+        log_msg(f"🎯 Coordinates found: {data}")
+        return data['x'], data['y']
     except Exception as e:
-        log_msg(f"⚠️ Gemini Vision Error: {e}")
+        log_msg(f"⚠️ Vision Error: {e}")
         return None, None
 
 # --- MAIN AUTOMATION ---
 async def run_vision_agent():
     try:
-        # Cleanup
         for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
 
         async with async_playwright() as p:
-            # Launch with Mobile Viewport (Critical for WAP site)
             browser = await p.chromium.launch(headless=True, args=['--no-sandbox'])
             context = await browser.new_context(
-                viewport={"width": 412, "height": 915}, # Pixel Mobile Size
+                viewport={"width": 412, "height": 915},
                 device_scale_factor=2.0,
                 is_mobile=True,
                 has_touch=True
             )
             page = await context.new_page()
 
-            # 1. Load Page
-            log_msg("Navigating to URL...")
+            log_msg("Navigating to Huawei...")
             await page.goto("https://id5.cloud.huawei.com/CAS/mobile/standard/register/wapRegister.html?reqClientType=7&loginChannel=7000000&regionCode=hk&loginUrl=https%3A%2F%2Fid5.cloud.huawei.com%2FCAS%2Fmobile%2Fstandard%2FwapLogin.html&lang=en-us&themeName=huawei#/wapRegister/regByPhone")
             await asyncio.sleep(5)
             
-            # Function to Process a Step using AI
-            async def ai_click(desc, step_num):
-                # Screenshot Capture
-                path = f"{CAPTURE_DIR}/{step_num}_before_{desc.replace(' ','_')}.jpg"
+            # --- ACTION HELPER ---
+            async def ai_action(desc, step_id):
+                path = f"{CAPTURE_DIR}/{step_id}_scan.jpg"
                 await page.screenshot(path=path)
                 
-                # Ask Gemini
-                x, y = await ask_gemini_for_coordinates(path, desc)
-                
+                x, y = await ask_gemini(path, desc)
                 if x and y:
-                    # Visual Indicator (Red Dot)
+                    # Draw Target
                     await page.evaluate(f"""
-                        var dot = document.createElement('div');
-                        dot.style.position = 'absolute';
-                        dot.style.left = '{x-10}px';
-                        dot.style.top = '{y-10}px';
-                        dot.style.width = '20px';
-                        dot.style.height = '20px';
-                        dot.style.background = 'red';
-                        dot.style.borderRadius = '50%';
-                        dot.style.zIndex = '10000';
-                        dot.style.border = '2px solid white';
-                        document.body.appendChild(dot);
+                        var d = document.createElement('div');
+                        d.style.position='absolute';d.style.left='{x-10}px';d.style.top='{y-10}px';
+                        d.style.width='20px';d.style.height='20px';d.style.background='rgba(255,0,0,0.5)';
+                        d.style.borderRadius='50%';d.style.zIndex='99999';d.style.border='2px solid white';
+                        document.body.appendChild(d);
                     """)
-                    await page.screenshot(path=f"{CAPTURE_DIR}/{step_num}_targeting_{desc}.jpg")
+                    await page.screenshot(path=f"{CAPTURE_DIR}/{step_id}_targeted.jpg")
                     
-                    # Click
                     await page.mouse.click(x, y)
-                    log_msg(f"Clicked on {x},{y}")
-                    await asyncio.sleep(3) # Wait for UI update
+                    log_msg(f"Clicked at {x}, {y}")
+                    await asyncio.sleep(3)
                     return True
                 return False
 
-            # --- EXECUTION STEPS ---
+            # --- STEPS ---
+            await ai_action("The Country/Region dropdown (usually Hong Kong)", "01_country")
             
-            # 2. Click Country Dropdown
-            await ai_click("The Country/Region selector dropdown (usually showing Hong Kong)", "01")
-            
-            # 3. Search Bar
-            # Yahan hum try karte hain seedha type karne ki, agar fail hua to click karenge
             log_msg("Typing 'Pakistan'...")
             await page.keyboard.type("Pakistan", delay=100)
             await asyncio.sleep(2)
             await page.screenshot(path=f"{CAPTURE_DIR}/02_typed.jpg")
             
-            # 4. Select Pakistan
-            await ai_click("The list item that says Pakistan +92", "03")
+            await ai_action("The list item 'Pakistan +92'", "03_select_pak")
             
-            # 5. Input Number
-            # Sometimes explicit click helps focus
-            await ai_click("The Phone Number input field", "04")
+            await ai_action("Phone number input field", "04_phone_input")
             log_msg(f"Typing Number: {TARGET_PHONE}")
             await page.keyboard.type(TARGET_PHONE, delay=100)
-            await page.screenshot(path=f"{CAPTURE_DIR}/05_filled.jpg")
             
-            # 6. Click Get Code
-            await ai_click("The 'Get code' button", "06")
+            await ai_action("The 'Get code' button", "05_get_code")
 
-            # 7. Monitor Result
-            log_msg("Monitoring for 15 seconds...")
+            log_msg("Monitoring...")
             for i in range(5):
                 await asyncio.sleep(3)
                 await page.screenshot(path=f"{CAPTURE_DIR}/monitor_{i}.jpg")
 
-            log_msg("✅ AI Session Finished.")
+            log_msg("✅ Sequence Complete.")
             await browser.close()
 
     except Exception as e:

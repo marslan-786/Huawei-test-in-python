@@ -1,6 +1,5 @@
 FROM python:3.11-bookworm
 
-# Dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libnss3 \
