@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 COPY requirements.txt .
+# Stealth plugin install hoga
 RUN pip install --no-cache-dir -U -r requirements.txt
 RUN playwright install chromium
 RUN playwright install-deps
