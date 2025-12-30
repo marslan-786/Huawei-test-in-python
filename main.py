@@ -32,7 +32,7 @@ async def dashboard():
     return """
     <html>
     <head>
-        <title>Huawei Captcha Watcher</title>
+        <title>Huawei 60s Watcher</title>
         <style>
             body { background: #000; color: #00ff00; font-family: monospace; padding: 20px; text-align: center; }
             .box { border: 1px solid #333; padding: 15px; margin: 10px auto; max-width: 800px; background: #111; }
@@ -42,12 +42,12 @@ async def dashboard():
         </style>
     </head>
     <body>
-        <h1>🔭 HUAWEI CAPTCHA WATCHER</h1>
+        <h1>⏱️ 60s LONG MONITOR</h1>
         <div class="box">
-            <button onclick="startBot()">🚀 START & WATCH</button>
+            <button onclick="startBot()">🚀 START & RECORD (1 MIN)</button>
             <button onclick="refreshData()" style="background: #3498db;">🔄 REFRESH VIEW</button>
         </div>
-        <div class="box logs" id="logs">Ready...</div>
+        <div class="box logs" id="logs">Waiting...</div>
         <div class="box gallery" id="gallery"></div>
         <script>
             function startBot() {
@@ -74,18 +74,17 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    log_msg(">>> COMMAND: Start & Monitor Mode")
-    bt.add_task(run_precision_agent)
+    log_msg(">>> COMMAND: Start 60s Monitoring")
+    bt.add_task(run_long_monitor)
     return {"status": "started"}
 
-# --- HELPER: SHOW RED DOT (Ghost Mode) ---
+# --- HELPER: GHOST DOT ---
 async def show_red_dot(page, selector=None, x=None, y=None):
     if selector:
         box = await selector.bounding_box()
         if box:
             x = box['x'] + box['width'] / 2
             y = box['y'] + box['height'] / 2
-    
     if x and y:
         await page.evaluate(f"""
             var d = document.createElement('div');
@@ -97,12 +96,13 @@ async def show_red_dot(page, selector=None, x=None, y=None):
         """)
 
 # --- MAIN LOGIC ---
-async def run_precision_agent():
+async def run_long_monitor():
     try:
         for f in glob.glob(f"{CAPTURE_DIR}/*"): os.remove(f)
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True, args=['--no-sandbox'])
+            # Ensure mobile/touch context
             context = await browser.new_context(
                 viewport={"width": 412, "height": 915},
                 device_scale_factor=2.0,
@@ -124,15 +124,14 @@ async def run_precision_agent():
             await page.screenshot(path=f"{CAPTURE_DIR}/01_loaded.jpg")
 
             # --- STEP 1: PHONE INPUT ---
-            log_msg("🔍 Finding 'Phone number' field...")
             phone_input = page.locator("input[type='tel']") 
-            
             if await phone_input.count() > 0:
                 await show_red_dot(page, selector=phone_input.first)
                 await page.screenshot(path=f"{CAPTURE_DIR}/02_target_phone.jpg")
                 
-                log_msg("⚡ Clicking & Typing...")
-                await phone_input.first.click(force=True) 
+                # Using 'tap' instead of click for mobile simulation
+                await phone_input.first.tap() 
+                log_msg("⌨️ Typing Phone...")
                 await phone_input.first.fill(TARGET_PHONE)
                 await asyncio.sleep(1)
                 await page.screenshot(path=f"{CAPTURE_DIR}/03_filled.jpg")
@@ -140,40 +139,38 @@ async def run_precision_agent():
                 log_msg("❌ ERROR: Input not found!")
                 return
 
-            # --- STEP 2: GET CODE BUTTON ---
-            log_msg("🔍 Clicking 'Get code'...")
+            # --- STEP 2: GET CODE ---
             get_code_btn = page.get_by_text("Get code")
-            
             if await get_code_btn.count() > 0:
                 await show_red_dot(page, selector=get_code_btn.first)
                 await page.screenshot(path=f"{CAPTURE_DIR}/04_target_button.jpg")
                 
-                # Click and start watching immediately
-                await get_code_btn.first.click(force=True)
-                log_msg("✅ Clicked! NOW WATCHING...")
+                log_msg("👉 Tapping 'Get code'...")
+                # Mobile tap is often better handled than click
+                await get_code_btn.first.tap()
+                
+                # Just in case tap didn't work, dispatch a click event via JS
+                # This bypasses any overlay issues entirely
+                # await get_code_btn.first.evaluate("el => el.click()") 
+                # ^ (Commented out, trying tap first, but good backup)
+                
             else:
                 log_msg("❌ ERROR: Button not found!")
+                return
 
-            # --- EXTENDED MONITORING (30 Seconds) ---
-            log_msg("👀 Watching for CAPTCHA/Errors (30s)...")
+            # --- LONG MONITORING (60 Seconds) ---
+            log_msg("🎥 Recording for 60 seconds (Taking 30 shots)...")
             
-            for i in range(1, 16): # 15 steps * 2 seconds = 30 seconds
-                await asyncio.sleep(2)
-                timestamp = datetime.now().strftime("%S")
-                path = f"{CAPTURE_DIR}/monitor_{i}_{timestamp}.jpg"
+            for i in range(1, 31): # 30 frames
+                await asyncio.sleep(2) # 2 sec gap = 60 sec total
+                
+                timestamp = datetime.now().strftime("%M-%S")
+                path = f"{CAPTURE_DIR}/frame_{i:02d}_{timestamp}.jpg"
                 await page.screenshot(path=path)
                 
-                # Check for common popup elements
-                # Huawei captchas often live in iframes or divs with 'dialog'
-                if await page.locator("iframe").count() > 0:
-                    log_msg(f"⚠️ CAPTCHA/IFRAME DETECTED (Frame {i})")
-                
-                # Check for error text
-                content = await page.content()
-                if "error" in content.lower() or "failed" in content.lower():
-                     log_msg(f"⚠️ Possible ERROR text detected (Frame {i})")
+                log_msg(f"📸 Captured Frame {i}/30")
 
-            log_msg("✅ Monitoring Finished. Check Gallery.")
+            log_msg("✅ Recording Finished. Check Gallery.")
             await browser.close()
 
     except Exception as e:
