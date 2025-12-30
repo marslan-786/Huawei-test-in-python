@@ -1,31 +1,29 @@
 FROM python:3.11-bookworm
 
+# 1. Install Desktop Environment & Chrome
 RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    libpango-1.0-0 \
-    libcairo2 \
-    fonts-liberation \
-    fonts-noto-color-emoji \
+    chromium \
+    xvfb \
+    x11vnc \
+    fluxbox \
+    novnc \
+    net-tools \
+    supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -U -r requirements.txt
-RUN playwright install chromium
-RUN playwright install-deps
+# 2. Environment Variables
+ENV DISPLAY=:0
+ENV RESOLUTION=1280x720
 
-COPY . .
-CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"
+# 3. Setup Workspace
+WORKDIR /app
+
+# 4. Copy Start Scripts
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY start.sh .
+
+# 5. Permissions
+RUN chmod +x start.sh
+
+# 6. Start Command (Supervisor runs everything)
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
