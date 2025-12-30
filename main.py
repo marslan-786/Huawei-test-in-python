@@ -14,7 +14,7 @@ from PIL import Image
 # --- CONFIGURATION ---
 TARGET_PHONE = "3177635849"
 CAPTURE_DIR = "./captures"
-# 👇 Apni Key Yahan Paste Karein
+# 👇 APNI KEY YAHAN PASTE KAREIN
 API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyCz-X24ZgEZ79YRcg8ym9ZtuQHup1AVgJQ")
 
 app = FastAPI()
@@ -33,43 +33,13 @@ def log_msg(message):
 
 # --- SMART MODEL SETUP ---
 active_model = None
-
 def configure_genai():
     global active_model
     try:
         genai.configure(api_key=API_KEY)
-        log_msg("🔍 Checking available Gemini models...")
-        
-        # List all models
-        available_models = [m.name for m in genai.list_models()]
-        
-        # Priority list (Fastest to Slowest)
-        priority = [
-            "models/gemini-1.5-flash-latest",
-            "models/gemini-1.5-flash",
-            "models/gemini-1.5-pro",
-            "models/gemini-pro-vision"
-        ]
-        
-        chosen_model = None
-        for p in priority:
-            if p in available_models:
-                chosen_model = p
-                break
-        
-        if not chosen_model:
-            # Fallback if exact match not found, take first vision model
-            for m in available_models:
-                if "vision" in m or "flash" in m:
-                    chosen_model = m
-                    break
-        
-        if chosen_model:
-            log_msg(f"✅ Connected to Model: {chosen_model}")
-            active_model = genai.GenerativeModel(chosen_model)
-        else:
-            log_msg("❌ ERROR: No suitable Vision model found in your account!")
-            
+        # Force use 1.5 Flash (Best for speed/vision)
+        active_model = genai.GenerativeModel("models/gemini-1.5-flash")
+        log_msg("✅ Model Configured: gemini-1.5-flash")
     except Exception as e:
         log_msg(f"❌ API Error: {e}")
 
@@ -93,7 +63,7 @@ async def dashboard():
         </style>
     </head>
     <body>
-        <h1>👁️ GEMINI VISION DIRECT (Auto-Fix)</h1>
+        <h1>👁️ GEMINI VISION DIRECT (V2)</h1>
         <div class="box">
             <button class="btn-refresh" onclick="refresh()">🔄 REFRESH VIEW</button>
             <button class="btn-start" onclick="startBot()">🚀 START VISION AI</button>
@@ -131,26 +101,27 @@ async def get_status():
 
 @app.post("/start")
 async def start_bot(bt: BackgroundTasks):
-    # Re-configure on every run to ensure connection
     configure_genai()
     if not active_model:
         return {"status": "error", "msg": "No model found"}
-        
     log_msg(">>> Start Command Received")
     bt.add_task(run_vision_agent)
     return {"status": "started"}
 
 # --- AI BRAIN ---
 async def ask_gemini(image_path, element):
-    """Sends screenshot to Gemini and asks for coordinates"""
     try:
         log_msg(f"🧠 Asking AI to find: '{element}'")
         img = Image.open(image_path)
         
+        # Strict Prompting
         prompt = f"""
-        Look at this screenshot. I need to click the UI element: "{element}".
-        Return JSON ONLY with 'x' and 'y' coordinates of the center.
+        Look at this screenshot. I need to click the UI element described as: "{element}".
+        
+        Return valid JSON ONLY with 'x' and 'y' coordinates of the center.
+        If you are unsure, guess the most likely position.
         Example: {{"x": 150, "y": 400}}
+        Do not write markdown or explanations.
         """
         
         response = active_model.generate_content([prompt, img])
@@ -180,10 +151,11 @@ async def run_vision_agent():
 
             log_msg("Navigating to Huawei...")
             await page.goto("https://id5.cloud.huawei.com/CAS/mobile/standard/register/wapRegister.html?reqClientType=7&loginChannel=7000000&regionCode=hk&loginUrl=https%3A%2F%2Fid5.cloud.huawei.com%2FCAS%2Fmobile%2Fstandard%2FwapLogin.html&lang=en-us&themeName=huawei#/wapRegister/regByPhone")
-            await asyncio.sleep(5)
+            # Extra wait for full load
+            await asyncio.sleep(8) 
             
             # --- ACTION HELPER ---
-            async def ai_action(desc, step_id):
+            async def ai_action(desc, step_id, input_text=None, wait_after=3):
                 path = f"{CAPTURE_DIR}/{step_id}_scan.jpg"
                 await page.screenshot(path=path)
                 
@@ -193,7 +165,7 @@ async def run_vision_agent():
                     await page.evaluate(f"""
                         var d = document.createElement('div');
                         d.style.position='absolute';d.style.left='{x-10}px';d.style.top='{y-10}px';
-                        d.style.width='20px';d.style.height='20px';d.style.background='rgba(255,0,0,0.5)';
+                        d.style.width='20px';d.style.height='20px';d.style.background='red';
                         d.style.borderRadius='50%';d.style.zIndex='99999';d.style.border='2px solid white';
                         document.body.appendChild(d);
                     """)
@@ -201,25 +173,44 @@ async def run_vision_agent():
                     
                     await page.mouse.click(x, y)
                     log_msg(f"Clicked at {x}, {y}")
-                    await asyncio.sleep(3)
+                    
+                    # Agar input hai to thora ruk k type karo
+                    if input_text:
+                        await asyncio.sleep(1)
+                        # Ensure focus by clicking again if needed (optional)
+                        log_msg(f"Typing: {input_text}")
+                        await page.keyboard.type(input_text, delay=100)
+                    
+                    await asyncio.sleep(wait_after)
                     return True
                 return False
 
-            # --- STEPS ---
-            await ai_action("The Country/Region dropdown (usually Hong Kong)", "01_country")
+            # --- STEP 1: OPEN DROPDOWN (Improved Target) ---
+            # Hum arrow (>) ko target karenge taake menu paka khule
+            await ai_action("The arrow icon > on the far right of the Country/Region row", "01_open_menu", wait_after=5)
             
+            # --- STEP 2: CLICK SEARCH BAR (New Step) ---
+            # Type karne se pehle search bar par click karna zaroori hai mobile view main
+            await ai_action("The Search input field at the top of the list", "02_click_search", wait_after=1)
+            
+            # --- STEP 3: TYPE PAKISTAN ---
             log_msg("Typing 'Pakistan'...")
             await page.keyboard.type("Pakistan", delay=100)
-            await asyncio.sleep(2)
-            await page.screenshot(path=f"{CAPTURE_DIR}/02_typed.jpg")
+            await asyncio.sleep(3)
+            await page.screenshot(path=f"{CAPTURE_DIR}/03_searched.jpg")
             
-            await ai_action("The list item 'Pakistan +92'", "03_select_pak")
+            # --- STEP 4: SELECT PAKISTAN ---
+            # Ab Gemini ko Pakistan list main nazar ana chahiye
+            await ai_action("The text 'Pakistan +92' in the list", "04_select_pak", wait_after=5)
             
-            await ai_action("Phone number input field", "04_phone_input")
+            # --- STEP 5: PHONE NUMBER ---
+            # Input field ko clear karke likhein
+            await ai_action("The Phone number input field", "05_click_phone")
             log_msg(f"Typing Number: {TARGET_PHONE}")
             await page.keyboard.type(TARGET_PHONE, delay=100)
             
-            await ai_action("The 'Get code' button", "05_get_code")
+            # --- STEP 6: GET CODE ---
+            await ai_action("The small 'Get code' text button", "06_get_code")
 
             log_msg("Monitoring...")
             for i in range(5):
