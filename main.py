@@ -330,7 +330,7 @@ async def run_russia_flow():
                                     await solve_captcha(page, session_id, logger=log_msg)
                                     
                                     captcha_solved_status = True
-                                    await burst_wait(page, 5, "11_post_swap")
+                                    await burst_wait(page, 30, "11_post_swap")
                                     break
                             except: pass
                         
