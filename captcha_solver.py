@@ -29,7 +29,7 @@ async def load_ai_brain(logger):
         doc = await db[COL_SETTINGS].find_one({"_id": "slice_config"})
         if doc:
             SLICE_CONFIG = {k: doc.get(k,0) for k in ["top","bottom","left","right"]}
-            logger(f"⚙️ Loaded Config from DB: {SLICE_CONFIG}")
+            logger(f"⚙️ Loaded Config: {SLICE_CONFIG}")
         else:
             SLICE_CONFIG = {"top":0, "bottom":0, "left":0, "right":0}
             logger("⚠️ No Config Found! Using defaults.")
@@ -54,35 +54,21 @@ async def load_ai_brain(logger):
         logger(f"❌ AI Load Error: {e}")
 
 def slice_image_numpy(img, cfg):
-    """Cuts the image using Global Config"""
     h, w, _ = img.shape
-    # Crop based on calibration
     crop = img[cfg['top']:h-cfg['bottom'], cfg['left']:w-cfg['right']]
     if crop.size == 0: return None
-    
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     ch, cw = gray.shape
     th, tw = ch // 2, cw // 4
-    
-    tiles = []
-    for r in range(2):
-        for c in range(4):
-            tile = gray[r*th:(r+1)*th, c*tw:(c+1)*tw]
-            tiles.append(tile)
-    return tiles
+    return [gray[r*th:(r+1)*th, c*tw:(c+1)*tw] for r in range(2) for c in range(4)]
 
 def get_swap_indices_logic(puzzle_img_path):
-    """The Brain: Compares puzzle with masters"""
     if not AI_KNOWLEDGE_BASE: return None, None
-    
     puzzle_img = cv2.imread(puzzle_img_path)
     if puzzle_img is None: return None, None
-    
-    # Slice the fresh puzzle
     puzzle_tiles = slice_image_numpy(puzzle_img, SLICE_CONFIG)
     if not puzzle_tiles: return None, None
 
-    # 1. Match Background
     best_score = float('inf')
     best_master = None
 
@@ -95,7 +81,6 @@ def get_swap_indices_logic(puzzle_img_path):
 
     if not best_master: return None, None
 
-    # 2. Find differences
     diffs = []
     for i in range(8):
         d = cv2.absdiff(puzzle_tiles[i], best_master[i])
@@ -108,17 +93,17 @@ def get_swap_indices_logic(puzzle_img_path):
 # --- MAIN SOLVER ---
 async def solve_captcha(page, session_id, logger=print):
     await load_ai_brain(logger)
-    logger("🧩 SOLVER STARTED: Taking Full Screenshot...")
+    logger("🧩 SOLVER: Analyzing...")
 
-    # 1. Wait for render (Crucial)
-    logger("⏳ Waiting 5s for clear image...")
+    # 1. Wait for render
+    logger("⏳ Waiting 5s for image render...")
     await asyncio.sleep(5)
 
-    # 2. Take FULL PAGE Screenshot (Like Calibration)
+    # 2. Take FULL Screenshot
     img_path = f"./captures/{session_id}_puzzle.png"
     try:
         await page.screenshot(path=img_path)
-        logger(f"📸 Full Screenshot Saved: {img_path}")
+        logger(f"📸 Full Screenshot Saved")
     except Exception as e:
         logger(f"❌ Screen Error: {e}")
         return False
@@ -128,23 +113,15 @@ async def solve_captcha(page, session_id, logger=print):
     src_idx, trg_idx = get_swap_indices_logic(img_path)
     
     if src_idx is None:
-        logger("⚠️ AI Failed: Could not match background.")
+        logger("⚠️ AI Failed: No match found.")
         return False
         
-    logger(f"🎯 AI RESULT: Swap Tile {src_idx} -> {trg_idx}")
+    logger(f"🎯 AI TARGET: Swap Tile {src_idx} -> {trg_idx}")
 
-    # 4. Calculate Coordinates from CONFIG
-    # We use the raw image dimensions to determine where the grid is
-    # Just like we did in the Slicer Tool
-    
-    # Read image to get current dimensions (should match calibration)
+    # 4. Calculate Coordinates
+    # Re-read image for dimensions
     img = cv2.imread(img_path)
     h, w, _ = img.shape
-    
-    # Calculate Grid Box from Config
-    # Grid Starts at: x=left, y=top
-    # Grid Width = TotalWidth - left - right
-    # Grid Height = TotalHeight - top - bottom
     
     grid_x = SLICE_CONFIG['left']
     grid_y = SLICE_CONFIG['top']
@@ -156,7 +133,6 @@ async def solve_captcha(page, session_id, logger=print):
 
     def get_center(idx):
         r, c = idx // 4, idx % 4
-        # Calculate center relative to the full page
         cx = grid_x + (c * tile_w) + (tile_w / 2)
         cy = grid_y + (r * tile_h) + (tile_h / 2)
         return cx, cy
@@ -164,10 +140,10 @@ async def solve_captcha(page, session_id, logger=print):
     sx, sy = get_center(src_idx)
     tx, ty = get_center(trg_idx)
 
-    # 5. EXECUTE MOVE
-    logger(f"🖱️ Moving from ({int(sx)},{int(sy)}) to ({int(tx)},{int(ty)})")
+    # 5. EXECUTE DRAG (HOLD & MOVE)
+    logger(f"🖱️ Moving: ({int(sx)},{int(sy)}) to ({int(tx)},{int(ty)})")
     
-    # Visual Marker (For Video Proof)
+    # Visual Marker
     await page.evaluate(f"""
         var d = document.createElement('div');
         d.style.position='absolute'; d.style.left='{sx}px'; d.style.top='{sy}px';
@@ -179,23 +155,35 @@ async def solve_captcha(page, session_id, logger=print):
     try:
         client = await page.context.new_cdp_session(page)
         
-        # Touch Down
+        # A. TOUCH START
         await client.send("Input.dispatchTouchEvent", {
-            "type": "touchStart", "touchPoints": [{"x": sx, "y": sy}]
+            "type": "touchStart", 
+            "touchPoints": [{"x": sx, "y": sy}]
         })
-        await asyncio.sleep(0.2)
         
-        # Touch Move (Direct)
+        # B. HOLD (CRITICAL FIX)
+        logger("✊ Holding Tile...")
+        await asyncio.sleep(0.8) # 800ms Hold to register drag
+
+        # C. SLOW DRAG (Human-like Steps)
+        steps = 25 # ٹکڑوں میں لے کر جائے گا
+        for i in range(steps + 1):
+            t = i / steps
+            cx = sx + (tx - sx) * t
+            cy = sy + (ty - sy) * t
+            
+            await client.send("Input.dispatchTouchEvent", {
+                "type": "touchMove", 
+                "touchPoints": [{"x": cx, "y": cy}]
+            })
+            await asyncio.sleep(0.03) # Speed control
+
+        # D. TOUCH END
         await client.send("Input.dispatchTouchEvent", {
-            "type": "touchMove", "touchPoints": [{"x": tx, "y": ty}]
+            "type": "touchEnd", 
+            "touchPoints": []
         })
-        await asyncio.sleep(0.2)
-        
-        # Touch Up
-        await client.send("Input.dispatchTouchEvent", {
-            "type": "touchEnd", "touchPoints": []
-        })
-        logger("✅ Action Completed.")
+        logger("✅ Drag & Drop Complete.")
         
     except Exception as e:
         logger(f"❌ Move Failed: {e}")
