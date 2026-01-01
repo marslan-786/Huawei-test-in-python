@@ -19,9 +19,7 @@ async def load_ai_brain(logger):
     """Loads Slice Config & Master Images from DB into RAM"""
     global SLICE_CONFIG, AI_KNOWLEDGE_BASE, AI_LOADED
     
-    if AI_LOADED: 
-        logger("🧠 AI Brain already loaded in RAM.")
-        return 
+    if AI_LOADED: return 
     
     try:
         client = AsyncIOMotorClient(MONGO_URI)
@@ -31,38 +29,32 @@ async def load_ai_brain(logger):
         doc = await db[COL_SETTINGS].find_one({"_id": "slice_config"})
         if doc:
             SLICE_CONFIG = {k: doc.get(k,0) for k in ["top","bottom","left","right"]}
-            logger(f"⚙️ Loaded Config: {SLICE_CONFIG}")
+            logger(f"⚙️ Loaded Config from DB: {SLICE_CONFIG}")
         else:
             SLICE_CONFIG = {"top":0, "bottom":0, "left":0, "right":0}
             logger("⚠️ No Config Found! Using defaults.")
 
         # 2. Build Knowledge Base
-        logger("🏗️ Building Knowledge Base from DB...")
+        logger("🏗️ Building Knowledge Base...")
         AI_KNOWLEDGE_BASE = []
-        count = 0
         async for doc in db[COL_CAPTCHAS].find({"status": "labeled"}):
             try:
-                # Convert Binary to Numpy Image
                 nparr = np.frombuffer(doc['image'], np.uint8)
                 img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                
-                # Slice it to create a "Master Key"
                 tiles = slice_image_numpy(img, SLICE_CONFIG)
                 if tiles:
-                    # Swap tiles back to original positions to make it a perfect background
                     src, trg = doc.get('label_source'), doc.get('label_target')
                     tiles[src], tiles[trg] = tiles[trg], tiles[src] 
                     AI_KNOWLEDGE_BASE.append(tiles)
-                    count += 1
             except: pass
         
         AI_LOADED = True
-        logger(f"🧠 AI Ready! Loaded {count} Master Patterns.")
+        logger(f"🧠 AI Ready! Loaded {len(AI_KNOWLEDGE_BASE)} Masters.")
     except Exception as e:
         logger(f"❌ AI Load Error: {e}")
 
 def slice_image_numpy(img, cfg):
-    """Cuts the image into 8 pieces"""
+    """Cuts the image using Global Config"""
     h, w, _ = img.shape
     # Crop based on calibration
     crop = img[cfg['top']:h-cfg['bottom'], cfg['left']:w-cfg['right']]
@@ -75,7 +67,6 @@ def slice_image_numpy(img, cfg):
     tiles = []
     for r in range(2):
         for c in range(4):
-            # Extract tile
             tile = gray[r*th:(r+1)*th, c*tw:(c+1)*tw]
             tiles.append(tile)
     return tiles
@@ -96,10 +87,7 @@ def get_swap_indices_logic(puzzle_img_path):
     best_master = None
 
     for master in AI_KNOWLEDGE_BASE:
-        # Check size compatibility
         if master[0].shape != puzzle_tiles[0].shape: continue
-        
-        # Calculate total difference
         diff = sum(np.sum(cv2.absdiff(puzzle_tiles[i], master[i])) for i in range(8))
         if diff < best_score:
             best_score = diff
@@ -107,127 +95,110 @@ def get_swap_indices_logic(puzzle_img_path):
 
     if not best_master: return None, None
 
-    # 2. Find differences (The Swap)
+    # 2. Find differences
     diffs = []
     for i in range(8):
         d = cv2.absdiff(puzzle_tiles[i], best_master[i])
-        # Use threshold to ignore noise (color jitter)
         _, th = cv2.threshold(d, 30, 255, cv2.THRESH_BINARY)
-        score = np.sum(th)
-        diffs.append((score, i))
+        diffs.append((np.sum(th), i))
     
-    # Sort by difference (Highest diff = Moved tile)
     diffs.sort(key=lambda x: x[0], reverse=True)
     return diffs[0][1], diffs[1][1]
 
-# --- MAIN EXPORTED FUNCTION ---
+# --- MAIN SOLVER ---
 async def solve_captcha(page, session_id, logger=print):
-    # 1. Load Brain
     await load_ai_brain(logger)
-    
-    logger("🕵️ SOLVER: Looking for Captcha Element...")
+    logger("🧩 SOLVER STARTED: Taking Full Screenshot...")
 
-    # 2. Find the Frame & Element
-    # Note: We look for the image inside the captcha container
-    frames = page.frames
-    captcha_frame = None
-    for frame in frames:
-        try:
-            if await frame.get_by_text("swap 2 tiles", exact=False).count() > 0:
-                captcha_frame = frame; break
-        except: continue
-    
-    if not captcha_frame:
-        logger("❌ Solver Error: Frame not found")
-        return False
+    # 1. Wait for render (Crucial)
+    logger("⏳ Waiting 5s for clear image...")
+    await asyncio.sleep(5)
 
-    # 3. CRITICAL WAIT (Image Loading)
-    logger("⏳ Solver: Waiting 5s for image render...")
-    await asyncio.sleep(5) 
-
-    # 4. Take Screenshot
+    # 2. Take FULL PAGE Screenshot (Like Calibration)
+    img_path = f"./captures/{session_id}_puzzle.png"
     try:
-        # This selector targets the main image. 
-        # Make sure this matches what you calibrated!
-        # If it fails, try: captcha_frame.locator("canvas").first
-        img_element = captcha_frame.locator("img").first 
-        
-        if await img_element.count() == 0:
-            logger("❌ Solver Error: Image tag not found")
-            return False
-            
-        box = await img_element.bounding_box()
-        if not box:
-            logger("❌ Solver Error: Bounding box is null")
-            return False
-            
-        img_path = f"./captures/{session_id}_puzzle.png"
-        await page.screenshot(path=img_path, clip=box)
-        logger(f"📸 Snapshot taken: {img_path}")
-        
+        await page.screenshot(path=img_path)
+        logger(f"📸 Full Screenshot Saved: {img_path}")
     except Exception as e:
-        logger(f"❌ Screenshot Failed: {e}")
+        logger(f"❌ Screen Error: {e}")
         return False
 
-    # 5. AI Thinking
-    logger("🧠 AI is thinking...")
-    src, trg = get_swap_indices_logic(img_path)
+    # 3. AI Logic
+    logger("🧠 AI Calculating...")
+    src_idx, trg_idx = get_swap_indices_logic(img_path)
     
-    if src is None:
-        logger("⚠️ AI could not find a match in DB.")
+    if src_idx is None:
+        logger("⚠️ AI Failed: Could not match background.")
         return False
         
-    logger(f"🎯 RESULT: Swap Tile {src} with Tile {trg}")
+    logger(f"🎯 AI RESULT: Swap Tile {src_idx} -> {trg_idx}")
 
-    # 6. Calculate Geometry
-    grid_w, grid_h = box['width'], box['height']
-    start_x, start_y = box['x'], box['y']
-    tile_w, tile_h = grid_w / 4, grid_h / 2
+    # 4. Calculate Coordinates from CONFIG
+    # We use the raw image dimensions to determine where the grid is
+    # Just like we did in the Slicer Tool
+    
+    # Read image to get current dimensions (should match calibration)
+    img = cv2.imread(img_path)
+    h, w, _ = img.shape
+    
+    # Calculate Grid Box from Config
+    # Grid Starts at: x=left, y=top
+    # Grid Width = TotalWidth - left - right
+    # Grid Height = TotalHeight - top - bottom
+    
+    grid_x = SLICE_CONFIG['left']
+    grid_y = SLICE_CONFIG['top']
+    grid_w = w - SLICE_CONFIG['left'] - SLICE_CONFIG['right']
+    grid_h = h - SLICE_CONFIG['top'] - SLICE_CONFIG['bottom']
+    
+    tile_w = grid_w / 4
+    tile_h = grid_h / 2
 
     def get_center(idx):
         r, c = idx // 4, idx % 4
-        cx = start_x + (c * tile_w) + (tile_w / 2)
-        cy = start_y + (r * tile_h) + (tile_h / 2)
+        # Calculate center relative to the full page
+        cx = grid_x + (c * tile_w) + (tile_w / 2)
+        cy = grid_y + (r * tile_h) + (tile_h / 2)
         return cx, cy
 
-    sx, sy = get_center(src)
-    tx, ty = get_center(trg)
+    sx, sy = get_center(src_idx)
+    tx, ty = get_center(trg_idx)
 
-    # 7. Execute Move
-    logger(f"🖱️ Action: Moving {src} to {trg}...")
+    # 5. EXECUTE MOVE
+    logger(f"🖱️ Moving from ({int(sx)},{int(sy)}) to ({int(tx)},{int(ty)})")
     
-    # Visual Marker (Red Dot)
+    # Visual Marker (For Video Proof)
     await page.evaluate(f"""
         var d = document.createElement('div');
         d.style.position='absolute'; d.style.left='{sx}px'; d.style.top='{sy}px';
-        d.style.width='20px'; d.style.height='20px'; d.style.background='red'; d.style.zIndex='99999'; d.style.border='2px solid white';
+        d.style.width='20px'; d.style.height='20px'; d.style.background='red'; 
+        d.style.zIndex='999999'; d.style.border='2px solid white'; d.style.borderRadius='50%';
         document.body.appendChild(d);
     """)
 
-    # Touch Simulation
     try:
         client = await page.context.new_cdp_session(page)
         
-        # Down
+        # Touch Down
         await client.send("Input.dispatchTouchEvent", {
             "type": "touchStart", "touchPoints": [{"x": sx, "y": sy}]
         })
         await asyncio.sleep(0.2)
         
-        # Move
+        # Touch Move (Direct)
         await client.send("Input.dispatchTouchEvent", {
             "type": "touchMove", "touchPoints": [{"x": tx, "y": ty}]
         })
         await asyncio.sleep(0.2)
         
-        # Up
+        # Touch Up
         await client.send("Input.dispatchTouchEvent", {
             "type": "touchEnd", "touchPoints": []
         })
-        logger("✅ Touch Event Sent.")
+        logger("✅ Action Completed.")
         
     except Exception as e:
-        logger(f"❌ Touch Failed: {e}")
+        logger(f"❌ Move Failed: {e}")
         return False
 
     return True
