@@ -1,492 +1,361 @@
-import base64
 import uvicorn
+import base64
+import cv2
+import numpy as np
+import asyncio
+import json
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from motor.motor_asyncio import AsyncIOMotorClient
-from bson import ObjectId
 from pydantic import BaseModel
-from datetime import datetime
+from bson import ObjectId
 
 # --- CONFIGURATION ---
 MONGO_URI = "mongodb://mongo:AEvrikOWlrmJCQrDTQgfGtqLlwhwLuAA@crossover.proxy.rlwy.net:29609"
 DB_NAME = "huawei_captcha"
-COLLECTION_NAME = "captchas"
+COL_CAPTCHAS = "captchas"
+COL_SETTINGS = "bot_settings"
 
 app = FastAPI()
 
-# Database Connection
-client = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=10000)
+# Database
+client = AsyncIOMotorClient(MONGO_URI)
 db = client[DB_NAME]
-collection = db[COLLECTION_NAME]
+col_captchas = db[COL_CAPTCHAS]
+col_settings = db[COL_SETTINGS]
 
-class LabelRequest(BaseModel):
-    id: str
-    source_idx: int
-    target_idx: int
+# In-Memory Settings Cache
+current_settings = {"top": 0, "bottom": 0, "left": 0, "right": 0}
 
-# Test DB Connection on Startup
+# --- STARTUP ---
 @app.on_event("startup")
-async def startup_db():
+async def startup():
+    global current_settings
     try:
         await client.server_info()
-        count = await collection.count_documents({})
-        print(f"✅ MongoDB Connected! Total Documents: {count}")
+        doc = await col_settings.find_one({"_id": "slice_config"})
+        if doc:
+            current_settings = {k: doc.get(k,0) for k in ["top","bottom","left","right"]}
+            print(f"✅ Loaded Settings from DB: {current_settings}")
     except Exception as e:
-        print(f"❌ MongoDB Connection Failed: {e}")
+        print(f"❌ DB Error: {e}")
 
-# --- DASHBOARD UI ---
+# --- MODELS ---
+class SliceParams(BaseModel):
+    id: str
+    top: int
+    bottom: int
+    left: int
+    right: int
+
+class SaveConfigParams(BaseModel):
+    top: int
+    bottom: int
+    left: int
+    right: int
+
+# --- UI ---
 @app.get("/", response_class=HTMLResponse)
-async def labeler_ui():
+async def ui():
     return """
     <html>
     <head>
-        <title>Huawei AI Trainer</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Huawei AI Master Tool</title>
         <style>
-            body { background: #0a0a0a; color: #fff; font-family: 'Segoe UI', sans-serif; text-align: center; padding: 10px; margin: 0; }
-            .container { max-width: 600px; margin: 0 auto; background: #141414; padding: 20px; border-radius: 12px; border: 1px solid #333; }
-            h2 { color: #00e676; margin-top: 0; }
+            body { background: #0d0d0d; color: #eee; font-family: monospace; padding: 20px; text-align: center; }
+            .container { max-width: 950px; margin: 0 auto; background: #1a1a1a; padding: 20px; border-radius: 10px; border: 1px solid #333; }
+            h2 { color: #00e676; margin-top: 0; border-bottom: 1px solid #333; padding-bottom: 10px; }
             
-            /* IMAGE WRAPPER */
-            .img-wrapper { 
-                position: relative; 
-                width: 100%;
-                max-width: 500px;
-                height: 250px; 
-                margin: 20px auto; 
-                border: 2px solid #444;
-                background: #000;
-            }
-            /* FULL IMAGE DISPLAY */
-            #captcha-img { 
-                width: 100%; 
-                height: 100%; 
-                display: block; 
-                object-fit: contain; 
-            }
+            /* GRID LAYOUT */
+            .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; text-align: left; }
             
-            /* VISUAL GRID (CSS Only - No Image Cutting) */
-            .grid-overlay { 
-                position: absolute; 
-                top: 0; 
-                left: 0; 
-                width: 100%; 
-                height: 100%; 
-                display: grid; 
-                grid-template-columns: repeat(4, 1fr); 
-                grid-template-rows: repeat(2, 1fr);
-                pointer-events: none;
-            }
-            .grid-cell { 
-                border: 1px solid rgba(255,255,255,0.3); 
-                display: flex; 
-                align-items: center; 
-                justify-content: center;
-                font-size: 28px; 
-                font-weight: bold; 
-                color: rgba(255, 255, 255, 0.6);
-                cursor: pointer; 
-                user-select: none; 
-                text-shadow: 2px 2px 4px black;
-                pointer-events: auto;
-            }
-            .grid-cell:hover { background: rgba(255,255,255,0.15); }
-            
-            /* SELECTION COLORS */
-            .src-cell { 
-                background: rgba(255, 61, 0, 0.6) !important; 
-                border: 3px solid red !important; 
-                color: white; 
-            }
-            .trg-cell { 
-                background: rgba(0, 230, 118, 0.6) !important; 
-                border: 3px solid #00e676 !important; 
-                color: white; 
-            }
+            /* INPUTS */
+            .control-panel { background: #222; padding: 15px; border-radius: 8px; }
+            .inp-row { display: flex; justify-content: space-between; margin-bottom: 10px; }
+            input { width: 60px; background: #000; border: 1px solid #555; color: #00e676; text-align: center; font-weight: bold; padding: 5px; }
+            label { font-size: 12px; color: #aaa; align-self: center; }
 
-            .btn { 
-                width: 100%; 
-                padding: 15px; 
-                border: none; 
-                border-radius: 6px; 
-                font-weight: bold; 
-                font-size: 16px; 
-                cursor: pointer; 
-                margin-top: 15px; 
-            }
-            .btn-save { 
-                background: #6200ea; 
-                color: white; 
-                opacity: 0.5; 
-                pointer-events: none; 
-            }
-            .btn-active { 
-                opacity: 1; 
-                pointer-events: auto; 
-                animation: pulse 1s infinite;
-            }
+            /* BUTTONS */
+            button { width: 100%; padding: 12px; margin-top: 5px; font-weight: bold; cursor: pointer; border: none; border-radius: 5px; color: white; transition: 0.2s; }
+            button:hover { opacity: 0.8; }
+            .btn-blue { background: #2979ff; }
+            .btn-org { background: #ff9100; }
+            .btn-green { background: #00c853; }
+            .btn-red { background: #d50000; }
             
-            @keyframes pulse {
-                0%, 100% { transform: scale(1); }
-                50% { transform: scale(1.02); }
-            }
+            /* VISUALS */
+            .preview-area { background: #000; border: 1px solid #444; padding: 10px; text-align: center; min-height: 200px; }
+            #raw-img { max-width: 100%; max-height: 150px; display: none; margin: 0 auto; }
             
-            .btn-del { 
-                background: #d32f2f; 
-                color: white; 
-                margin-top: 10px; 
-            }
+            .tiles-wrapper { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; margin-top: 10px; border: 2px solid #ff9100; display:none; }
+            .tile { width: 100%; display: block; border: 1px solid #333; }
             
-            .info { 
-                margin-top: 10px; 
-                color: #aaa; 
-                font-size: 14px; 
-            }
-            
-            .loading { 
-                color: yellow; 
-                font-size: 16px; 
-                margin: 20px; 
-            }
+            /* CONSOLE */
+            .console { background: #000; color: #00e676; height: 150px; overflow-y: auto; text-align: left; padding: 10px; border: 1px solid #333; margin-top: 20px; font-size: 12px; }
+            .log-entry { margin-bottom: 4px; border-bottom: 1px solid #111; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h2>🧠 AI DATA TRAINER</h2>
+            <h2>🛠️ SLICER & AI LOGIC TESTER</h2>
             
-            <div class="info">
-                Images Left: <span id="s-remain" style="color:yellow; font-weight:bold">...</span> | 
-                Done: <span id="s-done" style="color:#00e676">...</span>
+            <div class="main-grid">
+                <div class="control-panel">
+                    <h3 style="margin-top:0">1. CALIBRATION</h3>
+                    <div class="inp-row"><label>TOP Crop</label><input type="number" id="t"></div>
+                    <div class="inp-row"><label>BOTTOM Crop</label><input type="number" id="b"></div>
+                    <div class="inp-row"><label>LEFT Crop</label><input type="number" id="l"></div>
+                    <div class="inp-row"><label>RIGHT Crop</label><input type="number" id="r"></div>
+                    
+                    <button class="btn-blue" onclick="loadImage()">🔄 LOAD IMAGE</button>
+                    <button class="btn-org" onclick="slicePreview()">🔪 PREVIEW CUTS</button>
+                    <button class="btn-green" onclick="saveSettings()">💾 SAVE TO DB</button>
+                    
+                    <hr style="border-color:#333; margin:15px 0;">
+                    
+                    <h3 style="margin-top:0">2. AI TESTING</h3>
+                    <button class="btn-red" onclick="testAI()">🧠 TEST LOGIC (Random)</button>
+                    <button class="btn-blue" style="background:#6200ea" onclick="batchCheck()">⚡ CHECK ALL IMAGES</button>
+                </div>
+
+                <div class="preview-area">
+                    <h4 style="margin:0; color:#aaa;">VISUAL FEEDBACK</h4>
+                    <br>
+                    <img id="raw-img">
+                    <div id="tiles-box" class="tiles-wrapper"></div>
+                    <div id="ai-result" style="margin-top:10px; font-weight:bold; color:yellow;"></div>
+                </div>
             </div>
 
-            <div class="img-wrapper">
-                <img id="captcha-img" src="" alt="Loading...">
-                <div class="grid-overlay" id="grid"></div>
-            </div>
-
-            <div class="info" style="font-size: 18px; margin: 20px 0;">
-                Move Tile <span id="disp-src" style="color:red; font-weight:bold; font-size: 24px;">?</span> 
-                ➡️ To <span id="disp-trg" style="color:#00e676; font-weight:bold; font-size: 24px;">?</span>
-            </div>
-
-            <button id="btn-save" class="btn btn-save" onclick="saveLabel()">✅ SAVE (Enter)</button>
-            <button class="btn btn-del" onclick="deleteImage()">🗑️ DELETE IMAGE</button>
-            
-            <div class="loading" id="loading">Loading...</div>
+            <div class="console" id="logs">System Ready...</div>
         </div>
 
         <script>
             let currentId = null;
-            let src = null;
-            let trg = null;
 
-            // Generate Visual Grid
-            const grid = document.getElementById('grid');
-            for(let i=0; i<8; i++) {
-                let cell = document.createElement('div');
-                cell.className = 'grid-cell';
-                cell.innerText = i;
-                cell.id = 'cell-' + i;
-                cell.onclick = () => handleCellClick(i);
-                grid.appendChild(cell);
-            }
-
-            function handleCellClick(idx) {
-                // Clear previous selections
-                document.querySelectorAll('.grid-cell').forEach(c => {
-                    c.classList.remove('src-cell'); 
-                    c.classList.remove('trg-cell');
+            // Init
+            window.onload = () => {
+                log("Connecting to DB...");
+                fetch('/get_config').then(r=>r.json()).then(d=>{
+                    document.getElementById('t').value = d.top;
+                    document.getElementById('b').value = d.bottom;
+                    document.getElementById('l').value = d.left;
+                    document.getElementById('r').value = d.right;
+                    log("✅ Loaded Config: " + JSON.stringify(d));
                 });
+            };
 
-                // Select logic
-                if (idx === -1) {
-                    // Reset
-                    src = null;
-                    trg = null;
-                } else if (src === null) {
-                    // First click - select source
-                    src = idx;
-                } else if (src === idx) {
-                    // Click same cell - deselect
-                    src = null;
-                } else if (trg === null) {
-                    // Second click - select target
-                    trg = idx;
-                } else {
-                    // Third click - reset and start over
-                    src = idx;
-                    trg = null;
-                }
-
-                // Update visual feedback
-                if(src !== null) document.getElementById('cell-'+src).classList.add('src-cell');
-                if(trg !== null) document.getElementById('cell-'+trg).classList.add('trg-cell');
-                
-                document.getElementById('disp-src').innerText = src !== null ? src : "?";
-                document.getElementById('disp-trg').innerText = trg !== null ? trg : "?";
-
-                // Enable/Disable save button
-                const btn = document.getElementById('btn-save');
-                if(src !== null && trg !== null) {
-                    btn.classList.add('btn-active');
-                    btn.innerText = "✅ SAVE NOW (Enter)";
-                } else {
-                    btn.classList.remove('btn-active');
-                    btn.innerText = "Select Source & Target";
-                }
+            function log(msg) {
+                const c = document.getElementById('logs');
+                c.innerHTML = `<div class='log-entry'>[${new Date().toLocaleTimeString()}] ${msg}</div>` + c.innerHTML;
             }
 
-            function loadNext() {
-                // Reset state
-                src = null; 
-                trg = null; 
-                handleCellClick(-1);
-                
-                document.getElementById('captcha-img').style.opacity = 0.3;
-                document.getElementById('loading').style.display = 'block';
+            function loadImage() {
+                log("Fetching random image...");
+                fetch('/get_random').then(r=>r.json()).then(d=>{
+                    if(d.status === 'error') { alert(d.message); return; }
+                    currentId = d.id;
+                    const img = document.getElementById('raw-img');
+                    img.src = "data:image/jpeg;base64," + d.image;
+                    img.style.display = 'block';
+                    document.getElementById('tiles-box').style.display = 'none';
+                    document.getElementById('ai-result').innerText = "";
+                    log("📸 Loaded Image ID: " + d.id);
+                });
+            }
 
-                fetch('/get_task')
-                    .then(r => r.json())
-                    .then(d => {
-                        document.getElementById('loading').style.display = 'none';
-                        
-                        if (d.status === "done") {
-                            alert("🎉 All images labeled!");
-                            document.getElementById('captcha-img').src = "";
-                            return;
-                        }
-                        
-                        if (d.status === "error") {
-                            alert("❌ Error: " + d.message);
-                            console.error("Error details:", d);
-                            return;
-                        }
-                        
-                        currentId = d.id;
-                        
-                        // Load Full Image
-                        const img = document.getElementById('captcha-img');
-                        img.onload = () => {
-                            img.style.opacity = 1;
-                        };
-                        img.onerror = () => {
-                            alert("Failed to load image!");
-                            loadNext();
-                        };
-                        img.src = "data:image/jpeg;base64," + d.image_data;
-                        
-                        document.getElementById('s-done').innerText = d.stats.labeled;
-                        document.getElementById('s-remain').innerText = d.stats.total - d.stats.labeled;
-                    })
-                    .catch(err => {
-                        document.getElementById('loading').style.display = 'none';
-                        console.error("Fetch error:", err);
-                        alert("Network error: " + err);
+            function slicePreview() {
+                if(!currentId) { alert("Load image first"); return; }
+                const p = getParams();
+                p.id = currentId;
+                
+                log("🔪 Slicing...");
+                fetch('/slice', {
+                    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(p)
+                }).then(r=>r.json()).then(d=>{
+                    const box = document.getElementById('tiles-box');
+                    box.innerHTML = "";
+                    box.style.display = 'grid';
+                    d.tiles.forEach(t => {
+                        box.innerHTML += `<img class="tile" src="data:image/jpeg;base64,${t}">`;
                     });
-            }
-
-            function saveLabel() {
-                if(!currentId || src === null || trg === null) {
-                    alert("Please select both source and target!");
-                    return;
-                }
-                
-                document.getElementById('loading').style.display = 'block';
-                
-                fetch('/save_label', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ 
-                        id: currentId, 
-                        source_idx: src, 
-                        target_idx: trg 
-                    })
-                })
-                .then(r => r.json())
-                .then(() => {
-                    loadNext();
-                })
-                .catch(err => {
-                    document.getElementById('loading').style.display = 'none';
-                    alert("Save failed: " + err);
+                    log("✅ Sliced into 8 tiles.");
                 });
             }
 
-            function deleteImage() {
-                if(!currentId) return;
-                
-                if(confirm("Delete this image? This cannot be undone!")) {
-                    document.getElementById('loading').style.display = 'block';
+            function saveSettings() {
+                const p = getParams();
+                fetch('/save_config', {
+                    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(p)
+                }).then(r=>r.json()).then(d=>{
+                    log("💾 CONFIG SAVED TO MONGODB!");
+                    alert("Settings Saved!");
+                });
+            }
+
+            function testAI() {
+                log("🤖 Starting AI Logic Test...");
+                fetch('/test_ai').then(r=>r.json()).then(d=>{
+                    document.getElementById('ai-result').innerText = d.message;
                     
-                    fetch('/delete_image', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ 
-                            id: currentId, 
-                            source_idx: 0, 
-                            target_idx: 0 
-                        })
-                    })
-                    .then(() => {
-                        loadNext();
-                    })
-                    .catch(err => {
-                        document.getElementById('loading').style.display = 'none';
-                        alert("Delete failed: " + err);
-                    });
-                }
+                    if(d.image) {
+                        document.getElementById('raw-img').src = "data:image/jpeg;base64," + d.image;
+                        document.getElementById('raw-img').style.display = 'block';
+                        
+                        // Show slices
+                        const box = document.getElementById('tiles-box');
+                        box.innerHTML = "";
+                        box.style.display = 'grid';
+                        d.tiles.forEach((t, i) => {
+                            let border = "1px solid #333";
+                            if(i === d.solution[0] || i === d.solution[1]) border = "2px solid yellow";
+                            box.innerHTML += `<img class="tile" style="border:${border}" src="data:image/jpeg;base64,${t}">`;
+                        });
+                    }
+                    log("🏁 " + d.message);
+                });
             }
 
-            // Keyboard shortcuts
-            document.addEventListener('keydown', (e) => {
-                if(e.key === "Enter") {
-                    saveLabel();
-                } else if(e.key >= "0" && e.key <= "7") {
-                    handleCellClick(parseInt(e.key));
-                } else if(e.key === "Delete" || e.key === "Backspace") {
-                    if(e.ctrlKey) deleteImage();
-                }
-            });
+            function batchCheck() {
+                log("⚡ Starting Batch Process on DB...");
+                fetch('/batch_check').then(r=>r.json()).then(d=>{
+                    log(`📊 BATCH RESULT: Checked ${d.total}. Success: ${d.success}. Failed: ${d.failed}`);
+                    alert(`Check Complete!\nSuccess: ${d.success}\nFailed: ${d.failed}`);
+                });
+            }
 
-            // Auto-load on page load
-            loadNext();
+            function getParams() {
+                return {
+                    top: parseInt(document.getElementById('t').value)||0,
+                    bottom: parseInt(document.getElementById('b').value)||0,
+                    left: parseInt(document.getElementById('l').value)||0,
+                    right: parseInt(document.getElementById('r').value)||0
+                };
+            }
         </script>
     </body>
     </html>
     """
 
-# --- API ENDPOINTS ---
+# --- API ---
 
-@app.get("/get_task")
-async def get_task():
-    print("\n🔄 Fetching next image from DB...")
+@app.get("/get_config")
+async def get_config():
+    doc = await col_settings.find_one({"_id": "slice_config"})
+    if doc: return {k: doc.get(k,0) for k in ["top","bottom","left","right"]}
+    return current_settings
+
+@app.get("/get_random")
+async def get_random():
+    pipeline = [{"$match": {"image": {"$exists": True}}}, {"$sample": {"size": 1}}]
+    cursor = col_captchas.aggregate(pipeline)
+    docs = await cursor.to_list(length=1)
+    if not docs: return {"status": "error", "message": "DB Empty"}
+    doc = docs[0]
+    b64 = base64.b64encode(bytes(doc['image'])).decode('utf-8')
+    return {"status": "ok", "id": str(doc["_id"]), "image": b64}
+
+@app.post("/slice")
+async def slice_img(p: SliceParams):
+    try:
+        doc = await col_captchas.find_one({"_id": ObjectId(p.id)})
+        nparr = np.frombuffer(doc['image'], np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        # Crop & Slice Logic
+        h, w, _ = img.shape
+        crop = img[p.top : h-p.bottom, p.left : w-p.right]
+        ch, cw, _ = crop.shape
+        th, tw = ch//2, cw//4
+        
+        tiles = []
+        for r in range(2):
+            for c in range(4):
+                tile = crop[r*th:(r+1)*th, c*tw:(c+1)*tw]
+                _, buf = cv2.imencode('.jpg', tile)
+                tiles.append(base64.b64encode(buf).decode('utf-8'))
+        
+        return {"tiles": tiles}
+    except Exception as e:
+        return {"tiles": []}
+
+@app.post("/save_config")
+async def save_conf(p: SaveConfigParams):
+    global current_settings
+    current_settings = p.dict()
+    await col_settings.update_one({"_id": "slice_config"}, {"$set": current_settings}, upsert=True)
+    return {"status": "saved"}
+
+@app.get("/test_ai")
+async def test_ai():
+    # 1. Get Labeled Image
+    pipeline = [{"$match": {"status": "labeled"}}, {"$sample": {"size": 1}}]
+    cursor = col_captchas.aggregate(pipeline)
+    docs = await cursor.to_list(length=1)
     
-    try:
-        # Check DB Connection
-        count = await collection.count_documents({})
-        print(f"📊 Total Documents in DB: {count}")
-        
-        if count == 0:
-            print("❌ No documents found in database!")
-            return {"status": "error", "message": "Database is empty"}
-        
-        # Find unlabeled image
-        doc = await collection.find_one({
-            "$and": [
-                {"label_source": {"$exists": False}}, 
-                {"image": {"$exists": True}}
-            ]
-        })
-        
-        # Count labeled images
-        labeled = await collection.count_documents({"label_source": {"$exists": True}})
-        print(f"✅ Labeled: {labeled}, Unlabeled: {count - labeled}")
-        
-        if not doc:
-            print("✅ No more unlabeled images!")
-            return {"status": "done"}
-        
-        print(f"📸 Image Found - ID: {doc['_id']}")
-        
-        # Extract image binary data
-        if 'image' not in doc:
-            print("❌ No image field in document!")
-            return {"status": "error", "message": "Document has no image"}
-        
-        binary_data = doc['image']
-        
-        # Check if it's bytes or Binary object
-        if hasattr(binary_data, '__bytes__'):
-            binary_data = bytes(binary_data)
-        
-        print(f"📏 Image Size: {len(binary_data)} bytes")
-        
-        if len(binary_data) < 100:
-            print("❌ Image too small, possibly corrupt")
-            await collection.delete_one({"_id": doc["_id"]})
-            return await get_task()
-        
-        # Convert to base64
-        b64_string = base64.b64encode(binary_data).decode('utf-8')
-        print(f"✅ Base64 string length: {len(b64_string)}")
-        
-        return {
-            "status": "ok",
-            "id": str(doc["_id"]),
-            "image_data": b64_string,
-            "stats": {
-                "total": count, 
-                "labeled": labeled
-            }
-        }
-        
-    except Exception as e:
-        print(f"❌ Error in get_task: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"status": "error", "message": str(e)}
+    if not docs: return {"message": "No Labeled Images found!"}
+    doc = docs[0]
+    
+    # 2. Slice using SAVED Settings
+    nparr = np.frombuffer(doc['image'], np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    h, w, _ = img.shape
+    
+    # Apply Config
+    cfg = current_settings
+    crop = img[cfg['top'] : h-cfg['bottom'], cfg['left'] : w-cfg['right']]
+    
+    # 3. Create Tiles
+    ch, cw, _ = crop.shape
+    th, tw = ch//2, cw//4
+    tiles = []
+    for r in range(2):
+        for c in range(4):
+            tile = crop[r*th:(r+1)*th, c*tw:(c+1)*tw]
+            _, buf = cv2.imencode('.jpg', tile)
+            tiles.append(base64.b64encode(buf).decode('utf-8'))
+    
+    full_b64 = base64.b64encode(doc['image']).decode('utf-8')
+    real_src = doc.get('label_source')
+    real_trg = doc.get('label_target')
+    
+    return {
+        "message": f"AI LOGIC TEST: Database expects Swap {real_src} <-> {real_trg}",
+        "image": full_b64,
+        "tiles": tiles,
+        "solution": [real_src, real_trg]
+    }
 
-@app.post("/save_label")
-async def save_label(req: LabelRequest):
-    try:
-        print(f"\n💾 Saving Label: Tile {req.source_idx} ➡️ Tile {req.target_idx}")
-        
-        result = await collection.update_one(
-            {"_id": ObjectId(req.id)},
-            {"$set": {
-                "label_source": req.source_idx,
-                "label_target": req.target_idx,
-                "status": "labeled",
-                "labeled_at": datetime.now()
-            }}
-        )
-        
-        if result.modified_count > 0:
-            print("✅ Label saved successfully")
-            return {"status": "saved"}
-        else:
-            print("⚠️ Document not found or not modified")
-            return {"status": "error", "message": "Failed to update"}
+@app.get("/batch_check")
+async def batch_check():
+    # Validate how many images can be successfully sliced with current config
+    success = 0
+    failed = 0
+    limit = 50
+    
+    cursor = col_captchas.find({}).limit(limit)
+    cfg = current_settings
+    
+    async for doc in cursor:
+        try:
+            nparr = np.frombuffer(doc['image'], np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            h, w, _ = img.shape
             
-    except Exception as e:
-        print(f"❌ Error saving label: {e}")
-        return {"status": "error", "message": str(e)}
-
-@app.post("/delete_image")
-async def delete_image(req: LabelRequest):
-    try:
-        print(f"\n🗑️ Deleting Image ID: {req.id}")
-        
-        result = await collection.delete_one({"_id": ObjectId(req.id)})
-        
-        if result.deleted_count > 0:
-            print("✅ Image deleted successfully")
-            return {"status": "deleted"}
-        else:
-            print("⚠️ Image not found")
-            return {"status": "error", "message": "Image not found"}
+            # Try Crop
+            if cfg['top'] + cfg['bottom'] >= h or cfg['left'] + cfg['right'] >= w:
+                failed += 1
+                continue
+                
+            crop = img[cfg['top'] : h-cfg['bottom'], cfg['left'] : w-cfg['right']]
+            if crop.size == 0:
+                failed += 1
+            else:
+                success += 1
+        except:
+            failed += 1
             
-    except Exception as e:
-        print(f"❌ Error deleting image: {e}")
-        return {"status": "error", "message": str(e)}
-
-# Health check endpoint
-@app.get("/health")
-async def health():
-    try:
-        count = await collection.count_documents({})
-        return {
-            "status": "healthy",
-            "db_connected": True,
-            "total_images": count
-        }
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "db_connected": False,
-            "error": str(e)
-        }
+    return {"total": limit, "success": success, "failed": failed}
 
 if __name__ == "__main__":
-    print("🚀 Starting Labeler on port 8001...")
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
