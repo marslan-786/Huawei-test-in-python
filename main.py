@@ -1,14 +1,17 @@
 import base64
+import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 from pydantic import BaseModel
 
-# --- 1. CONFIGURATION (MATCHING YOUR MAIN.PY) ---
+# --- 1. CONFIGURATION (MUST MATCH MAIN.PY) ---
 MONGO_URI = "mongodb://mongo:AEvrikOWlrmJCQrDTQgfGtqLlwhwLuAA@crossover.proxy.rlwy.net:29609"
-DB_NAME = "huawei_captcha"      # As per your script
-COLLECTION_NAME = "captchas"    # As per your script
+
+# 🔥 FIX: Database Name updated to match your Main.py
+DB_NAME = "huawei_captcha"      
+COLLECTION_NAME = "captchas"    
 
 app = FastAPI()
 
@@ -35,74 +38,64 @@ async def labeler_ui():
             .container { max-width: 600px; margin: 0 auto; background: #141414; padding: 20px; border-radius: 12px; border: 1px solid #333; }
             h2 { color: #00e676; margin-top: 0; }
             
-            /* STATS */
-            .stats-bar { display: flex; justify-content: space-between; background: #222; padding: 10px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; }
-            .stat-val { color: #00e676; font-weight: bold; font-size: 16px; }
-
-            /* IMAGE CONTAINER */
+            /* IMAGE WRAPPER */
             .img-wrapper { 
                 position: relative; 
                 width: 340px; 
                 height: 170px; 
-                margin: 0 auto; 
+                margin: 20px auto; 
                 border: 2px solid #444;
                 background: #000;
             }
+            /* FULL IMAGE DISPLAY */
             #captcha-img { width: 100%; height: 100%; display: block; object-fit: contain; }
             
-            /* GRID OVERLAY */
+            /* VISUAL GRID (CSS Only - No Image Cutting) */
             .grid-overlay { 
                 position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
                 display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr);
             }
             .grid-cell { 
-                border: 1px solid rgba(255,255,255,0.15); 
+                border: 1px solid rgba(255,255,255,0.2); 
                 display: flex; align-items: center; justify-content: center;
-                font-size: 24px; font-weight: bold; color: rgba(255, 255, 255, 0.4);
-                cursor: pointer; user-select: none;
+                font-size: 24px; font-weight: bold; color: rgba(255, 255, 255, 0.5);
+                cursor: pointer; user-select: none; text-shadow: 1px 1px 2px black;
             }
             .grid-cell:hover { background: rgba(255,255,255,0.1); }
             
-            /* SELECTION STYLES */
+            /* SELECTION COLORS */
             .src-cell { background: rgba(255, 61, 0, 0.5) !important; border: 2px solid red; color: white; }
             .trg-cell { background: rgba(0, 230, 118, 0.5) !important; border: 2px solid #00e676; color: white; }
 
-            /* CONTROLS */
-            .control-panel { display: flex; justify-content: space-between; margin-top: 20px; align-items: center; background: #222; padding: 10px; border-radius: 8px; }
-            .sel-box { font-size: 14px; color: #aaa; }
-            .sel-val { font-size: 20px; font-weight: bold; display: block; margin-top: 5px; }
-            
-            .btn { flex-grow: 1; padding: 15px; border: none; border-radius: 6px; font-weight: bold; font-size: 16px; cursor: pointer; margin-left: 10px; transition: 0.2s; }
+            .btn { width: 100%; padding: 15px; border: none; border-radius: 6px; font-weight: bold; font-size: 16px; cursor: pointer; margin-top: 15px; }
             .btn-save { background: #6200ea; color: white; opacity: 0.5; pointer-events: none; }
-            .btn-active { opacity: 1; pointer-events: auto; box-shadow: 0 0 10px #6200ea; }
-            .btn-del { background: #d32f2f; color: white; width: 100%; margin-top: 15px; padding: 10px; }
-
+            .btn-active { opacity: 1; pointer-events: auto; }
+            .btn-del { background: #d32f2f; color: white; margin-top: 10px; }
+            
+            .info { margin-top: 10px; color: #aaa; font-size: 14px; }
         </style>
     </head>
     <body>
         <div class="container">
             <h2>🧠 AI DATA TRAINER</h2>
             
-            <div class="stats-bar">
-                <span>Total Images: <span id="s-total" class="stat-val">...</span></span>
-                <span>Remaining: <span id="s-remain" class="stat-val" style="color:yellow">...</span></span>
-                <span>Done: <span id="s-done" class="stat-val">...</span></span>
+            <div class="info">
+                Images Left: <span id="s-remain" style="color:yellow; font-weight:bold">...</span> | 
+                Done: <span id="s-done" style="color:#00e676">...</span>
             </div>
 
             <div class="img-wrapper">
-                <img id="captcha-img" src="" alt="Loading Database Image...">
+                <img id="captcha-img" src="" alt="Loading...">
                 <div class="grid-overlay" id="grid"></div>
             </div>
 
-            <div class="control-panel">
-                <div class="sel-box">Move From<span id="disp-src" class="sel-val" style="color:#ff3d00">?</span></div>
-                <div style="font-size:24px; color:#555">➡️</div>
-                <div class="sel-box">Move To<span id="disp-trg" class="sel-val" style="color:#00e676">?</span></div>
-                <button id="btn-save" class="btn btn-save" onclick="saveLabel()">✅ SAVE (Enter)</button>
+            <div class="info" style="font-size: 16px;">
+                Move Tile <span id="disp-src" style="color:red; font-weight:bold">?</span> 
+                ➡️ To <span id="disp-trg" style="color:#00e676; font-weight:bold">?</span>
             </div>
 
-            <button class="btn btn-del" onclick="deleteImage()">🗑️ DELETE (Bad Image)</button>
-            <p style="font-size:12px; color:#666; margin-top:10px;">Shortcut: Click Source -> Click Target -> Press Enter</p>
+            <button id="btn-save" class="btn btn-save" onclick="saveLabel()">✅ SAVE (Enter)</button>
+            <button class="btn btn-del" onclick="deleteImage()">🗑️ DELETE IMAGE</button>
         </div>
 
         <script>
@@ -110,7 +103,7 @@ async def labeler_ui():
             let src = null;
             let trg = null;
 
-            // 1. Generate Grid
+            // Generate Visual Grid
             const grid = document.getElementById('grid');
             for(let i=0; i<8; i++) {
                 let cell = document.createElement('div');
@@ -121,65 +114,55 @@ async def labeler_ui():
                 grid.appendChild(cell);
             }
 
-            // 2. Logic
             function handleCellClick(idx) {
-                // Clear styles
                 document.querySelectorAll('.grid-cell').forEach(c => {
-                    c.classList.remove('src-cell');
-                    c.classList.remove('trg-cell');
+                    c.classList.remove('src-cell'); c.classList.remove('trg-cell');
                 });
 
-                if (src === null) {
-                    src = idx;
-                } else if (src === idx) {
-                    src = null; // Unselect
-                } else {
-                    trg = idx;
-                }
+                if (src === null) src = idx;
+                else if (src === idx) src = null;
+                else trg = idx;
 
-                // Apply Styles & Update UI
                 if(src !== null) document.getElementById('cell-'+src).classList.add('src-cell');
                 if(trg !== null) document.getElementById('cell-'+trg).classList.add('trg-cell');
                 
                 document.getElementById('disp-src').innerText = src !== null ? src : "?";
                 document.getElementById('disp-trg').innerText = trg !== null ? trg : "?";
 
-                // Enable Save
                 const btn = document.getElementById('btn-save');
                 if(src !== null && trg !== null) {
                     btn.classList.add('btn-active');
                     btn.innerText = "✅ SAVE NOW";
                 } else {
                     btn.classList.remove('btn-active');
-                    btn.innerText = "Select 2 Tiles...";
+                    btn.innerText = "Select Source & Target";
                 }
             }
 
-            // 3. Load from DB
             function loadNext() {
-                src = null; trg = null; handleCellClick(-1); // Reset
+                src = null; trg = null; handleCellClick(-1);
                 document.getElementById('captcha-img').style.opacity = 0.5;
 
                 fetch('/get_task').then(r => r.json()).then(d => {
                     if (d.status === "done") {
-                        alert("🎉 Awesome! No more unlabeled images.");
-                        document.body.innerHTML = "<h1>🏁 All Done! Great Job.</h1>";
+                        alert("🎉 All images labeled!");
+                        return;
+                    }
+                    if (d.status === "error") {
+                        alert("Error: " + d.message);
                         return;
                     }
                     
                     currentId = d.id;
-                    // DIRECT BINARY RENDER
+                    // Load Full Image
                     document.getElementById('captcha-img').src = "data:image/jpeg;base64," + d.image_data;
                     document.getElementById('captcha-img').style.opacity = 1;
                     
-                    // Stats
-                    document.getElementById('s-total').innerText = d.stats.total;
                     document.getElementById('s-done').innerText = d.stats.labeled;
                     document.getElementById('s-remain').innerText = d.stats.total - d.stats.labeled;
                 });
             }
 
-            // 4. Save
             function saveLabel() {
                 if(!currentId || src === null || trg === null) return;
                 
@@ -190,10 +173,9 @@ async def labeler_ui():
                 }).then(() => loadNext());
             }
 
-            // 5. Delete
             function deleteImage() {
                 if(!currentId) return;
-                if(confirm("Delete this image permanently from DB?")) {
+                if(confirm("Delete this image?")) {
                     fetch('/delete_image', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -206,7 +188,6 @@ async def labeler_ui():
                 if(e.key === "Enter") saveLabel();
             });
 
-            // Start
             loadNext();
         </script>
     </body>
@@ -217,47 +198,71 @@ async def labeler_ui():
 
 @app.get("/get_task")
 async def get_task():
-    # Find image where 'label_source' does NOT exist
-    doc = await collection.find_one({"label_source": {"$exists": False}})
+    print("🔄 Fetching next image from DB...")
     
-    total = await collection.count_documents({})
+    # Check DB Connection
+    try:
+        count = await collection.count_documents({})
+        print(f"📊 Total Docs in DB: {count}")
+    except Exception as e:
+        print(f"❌ DB Connection Error: {e}")
+        return {"status": "error", "message": str(e)}
+
+    # Find unlabeled image
+    doc = await collection.find_one({
+        "$and": [
+            {"label_source": {"$exists": False}}, 
+            {"image": {"$exists": True}}
+        ]
+    })
+    
     labeled = await collection.count_documents({"label_source": {"$exists": True}})
     
     if not doc:
+        print("✅ No more images found!")
         return {"status": "done"}
     
     try:
-        # Extract Binary Data directly from 'image' field
+        print(f"📸 Image Found ID: {doc['_id']}")
+        
+        # Binary Extraction
         binary_data = doc['image']
-        # Convert to Base64 for Browser
+        print(f"📏 Image Size: {len(binary_data)} bytes")
+        
+        # Base64 Conversion
         b64_string = base64.b64encode(binary_data).decode('utf-8')
         
         return {
             "status": "ok",
             "id": str(doc["_id"]),
             "image_data": b64_string,
-            "stats": {"total": total, "labeled": labeled}
+            "stats": {"total": count, "labeled": labeled}
         }
     except Exception as e:
-        print(f"❌ Corrupt Image ID {doc['_id']}: {e}")
-        # Auto-delete corrupt data to unblock queue
+        print(f"❌ Corrupt Image: {e}")
+        # Delete corrupt image to avoid loop
         await collection.delete_one({"_id": doc["_id"]})
         return await get_task()
 
 @app.post("/save_label")
 async def save_label(req: LabelRequest):
+    print(f"💾 Saving Label: {req.source_idx} -> {req.target_idx}")
     await collection.update_one(
         {"_id": ObjectId(req.id)},
         {"$set": {
             "label_source": req.source_idx,
             "label_target": req.target_idx,
             "status": "labeled",
-            "labeled_at": "now" # Just a timestamp placeholder
+            "labeled_at": "now"
         }}
     )
     return {"status": "saved"}
 
 @app.post("/delete_image")
 async def delete_image(req: LabelRequest):
+    print(f"🗑️ Deleting Image ID: {req.id}")
     await collection.delete_one({"_id": ObjectId(req.id)})
     return {"status": "deleted"}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
