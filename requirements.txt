@@ -1,13 +1,5 @@
 fastapi
 uvicorn
-playwright
-python-dotenv
-aiofiles
-imageio[ffmpeg]
-opencv-python-headless
-numpy
-scipy
-pytweening
-pyautogui
-pymongo
+motor
+jinja2
 python-multipart
