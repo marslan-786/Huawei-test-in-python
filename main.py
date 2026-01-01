@@ -26,8 +26,8 @@ COLLECTION_NAME = "captchas"
 
 PROXY_CONFIG = {
     "server": "http://p.webshare.io:80", 
-    "username": "wwwsyxzg-rotate", 
-    "password": "582ygxexguhx"
+    "username": "arldpbwk-rotate", 
+    "password": "iak7d1keh2ix"
 }
 
 # MongoDB Connection
