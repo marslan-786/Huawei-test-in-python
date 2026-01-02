@@ -76,6 +76,11 @@ def get_swap_indices_logic(puzzle_img_path):
 # --- MAIN SOLVER ---
 async def solve_captcha(page, session_id, logger=print):
     await load_ai_brain(logger)
+    
+    # Check viewport size to prevent clicking out of bounds
+    vp = page.viewport_size
+    logger(f"📏 Viewport Size: {vp['width']}x{vp['height']}")
+
     logger("⏳ Solver: Waiting 5s for image render...")
     await asyncio.sleep(5)
 
@@ -89,14 +94,17 @@ async def solve_captcha(page, session_id, logger=print):
         
     logger(f"🎯 AI TARGET: Swap Tile {src_idx} -> {trg_idx}")
 
-    # Calculate Coordinates based on Calibration Config
+    # Calculate Coordinates
     img = cv2.imread(img_path)
     h, w, _ = img.shape
+    
     grid_x = SLICE_CONFIG['left']
     grid_y = SLICE_CONFIG['top']
     grid_w = w - SLICE_CONFIG['left'] - SLICE_CONFIG['right']
     grid_h = h - SLICE_CONFIG['top'] - SLICE_CONFIG['bottom']
-    tile_w, tile_h = grid_w / 4, grid_h / 2
+    
+    tile_w = grid_w / 4
+    tile_h = grid_h / 2
 
     def get_center(idx):
         r, c = idx // 4, idx % 4
@@ -109,54 +117,83 @@ async def solve_captcha(page, session_id, logger=print):
 
     logger(f"📍 COORDS: Start({int(sx)},{int(sy)}) -> End({int(tx)},{int(ty)})")
 
-    # --- 🔥 VISUAL DEBUG DOTS 🔥 ---
+    # Safety Check: Is click inside viewport?
+    if sx > vp['width'] or sy > vp['height']:
+        logger("❌ CRITICAL: Click coordinates are OUTSIDE viewport! Re-calibrate.")
+        return False
+
+    # --- 🔥 FIXED VISUAL DOTS (ALWAYS ON TOP) 🔥 ---
     await page.evaluate(f"""
-        // Start Dot (Red)
-        var s = document.createElement('div');
-        s.style.position='absolute'; s.style.left='{sx-10}px'; s.style.top='{sy-10}px';
-        s.style.width='20px'; s.style.height='20px'; s.style.background='red'; 
-        s.style.zIndex='999999'; s.style.border='2px solid white'; s.style.borderRadius='50%';
-        document.body.appendChild(s);
+        // Clean old dots
+        document.querySelectorAll('.debug-dot').forEach(e => e.remove());
 
-        // End Dot (Blue)
-        var t = document.createElement('div');
-        t.style.position='absolute'; t.style.left='{tx-10}px'; t.style.top='{ty-10}px';
-        t.style.width='20px'; t.style.height='20px'; t.style.background='blue'; 
-        t.style.zIndex='999999'; t.style.border='2px solid white'; t.style.borderRadius='50%';
-        document.body.appendChild(t);
+        function createDot(x, y, color) {{
+            var d = document.createElement('div');
+            d.className = 'debug-dot';
+            d.style.position = 'fixed'; // FIXED stays on screen glass
+            d.style.left = (x - 10) + 'px';
+            d.style.top = (y - 10) + 'px';
+            d.style.width = '20px'; 
+            d.style.height = '20px'; 
+            d.style.background = color; 
+            d.style.borderRadius = '50%'; 
+            d.style.border = '3px solid white';
+            d.style.boxShadow = '0 0 10px black';
+            d.style.zIndex = '2147483647'; // MAX Z-INDEX
+            d.style.pointerEvents = 'none';
+            document.body.appendChild(d);
+        }}
+        createDot({sx}, {sy}, 'red');  // START
+        createDot({tx}, {ty}, 'blue'); // END
     """)
-    await asyncio.sleep(0.5) # Let dots render so we see them in video
+    
+    # Wait to see dots in video
+    await asyncio.sleep(1) 
 
-    # --- EXECUTE DRAG (HOLD & MOVE) ---
+    # --- EXECUTE FORCE DRAG ---
     try:
         client = await page.context.new_cdp_session(page)
         
-        # A. Touch Start
+        # 1. FORCE TOUCH START (Simulate Thumb Press)
         await client.send("Input.dispatchTouchEvent", {
-            "type": "touchStart", "touchPoints": [{"x": sx, "y": sy}]
+            "type": "touchStart", 
+            "touchPoints": [{
+                "x": sx, "y": sy, 
+                "force": 1.0,      # MAX PRESSURE
+                "radiusX": 25,     # THUMB SIZE
+                "radiusY": 25
+            }]
         })
         
-        # B. HOLD (Increased slightly for better registration)
-        logger("✊ Holding Tile (0.9s)...")
-        await asyncio.sleep(0.9) 
+        # 2. HOLD (Wait for physics to engage)
+        logger("✊ Holding (Force Click)...")
+        await asyncio.sleep(1.0) 
 
-        # C. SLOW DRAG
-        logger("➡️ Dragging...")
-        steps = 30
+        # 3. HEAVY DRAG
+        logger("➡️ Force Dragging...")
+        steps = 20
         for i in range(steps + 1):
             t = i / steps
             cx = sx + (tx - sx) * t
             cy = sy + (ty - sy) * t
+            
             await client.send("Input.dispatchTouchEvent", {
-                "type": "touchMove", "touchPoints": [{"x": cx, "y": cy}]
+                "type": "touchMove", 
+                "touchPoints": [{
+                    "x": cx, "y": cy,
+                    "force": 1.0,  # KEEP PRESSURE
+                    "radiusX": 25,
+                    "radiusY": 25
+                }]
             })
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.05) # Slower drag
 
-        # D. Touch End
+        # 4. RELEASE
         await client.send("Input.dispatchTouchEvent", {
-            "type": "touchEnd", "touchPoints": []
+            "type": "touchEnd", 
+            "touchPoints": []
         })
-        logger("✅ Drag Complete.")
+        logger("✅ Force Drag Complete.")
         
     except Exception as e:
         logger(f"❌ Move Failed: {e}"); return False
