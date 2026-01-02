@@ -26,8 +26,8 @@ TARGET_COUNTRY = "Russia"
 
 PROXY_CONFIG = {
     "server": "http://p.webshare.io:80", 
-    "username": "arldpbwk-rotate", 
-    "password": "iak7d1keh2ix"
+    "username": "klxgqgei-rotate", 
+    "password": "upjk9roh3rhi"
 }
 
 app = FastAPI()
