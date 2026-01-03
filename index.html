@@ -1,0 +1,64 @@
+<html>
+<head>
+    <title>Huawei Smart Bot</title>
+    <style>
+            body { background: #0a0a0a; color: #00e676; font-family: 'Courier New', monospace; padding: 20px; text-align: center; }
+            button { padding: 15px 30px; font-weight: bold; cursor: pointer; border:none; margin:5px; border-radius: 5px; font-size: 16px; transition: 0.3s; }
+            .btn-start { background: #6200ea; color: white; }
+            .btn-start:hover { background: #7c4dff; }
+            .btn-stop { background: #d50000; color: white; }
+            .btn-stop:hover { background: #ff1744; }
+            .logs { height: 300px; overflow-y: auto; text-align: left; border: 1px solid #333; padding: 10px; background: #111; margin-bottom: 20px; font-size: 12px; color: #ccc; }
+            #video-section { display:none; margin: 20px auto; border: 2px solid #00e676; padding:10px; background: #111; width: fit-content; border-radius: 10px; }
+            .gallery { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-top: 20px; }
+            .gallery img { height: 60px; border: 1px solid #333; opacity: 0.8; }
+            .gallery img:hover { height: 150px; border-color: white; opacity: 1; z-index:999; }
+    </style>
+</head>
+<body>
+    <h1>🇷🇺 HUAWEI SMART LOOP BOT</h1>
+    <div>
+        <button id="btn-toggle" onclick="toggleBot()" class="btn-start">🚀 START BOT</button>
+        <button onclick="makeVideo()" style="background: #0091ea; color: white;">🎬 MAKE VIDEO</button>
+        <button onclick="clearLogs()" style="background: #424242; color: white;">🗑️ CLEAR</button>
+    </div>
+    <div id="status-bar" style="display:none; color: yellow;"></div>
+    <div class="logs" id="logs">Waiting...</div>
+    <div id="video-section"><video id="v-player" controls width="500" autoplay loop></video></div>
+    <h3>🎞️ LIVE FEED</h3>
+    <div class="gallery" id="gallery"></div>
+    <script>
+        function toggleBot() {
+            const btn = document.getElementById('btn-toggle');
+            if (btn.innerText.includes("START")) {
+                fetch('/start', {method: 'POST'}); logUpdate(">>> SENDING START...");
+            } else {
+                fetch('/stop', {method: 'POST'}); logUpdate(">>> SENDING STOP...");
+            }
+        }
+        function clearLogs() { fetch('/clear_logs', {method:'POST'}); }
+        function refreshData() {
+            fetch('/status').then(r=>r.json()).then(d=>{
+                document.getElementById('logs').innerHTML = d.logs.map(l=>`<div>${l}</div>`).join('');
+                document.getElementById('gallery').innerHTML = d.images.map(i=>`<img src="${i}">`).join('');
+                const btn = document.getElementById('btn-toggle');
+                if (d.running) { btn.innerText = "🛑 STOP BOT"; btn.className = "btn-stop"; } 
+                    else { btn.innerText = "🚀 START BOT"; btn.className = "btn-start"; }
+            });
+        }
+        function makeVideo() {
+            fetch('/generate_video', {method: 'POST'}).then(r=>r.json()).then(d=>{
+                if(d.status === "done") {
+                    document.getElementById('video-section').style.display = 'block';
+                    var player = document.getElementById('v-player');
+                    player.src = "/captures/proof.mp4?t=" + Date.now();
+                    player.load(); player.play();
+                }
+            });
+        }
+        function logUpdate(msg) { var l = document.getElementById('logs'); l.innerHTML = "<div>" + msg + "</div>" + l.innerHTML; }
+            setInterval(refreshData, 2000);
+    </script>
+</body>
+</html>
+
