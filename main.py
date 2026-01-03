@@ -6,7 +6,7 @@ import time
 import imageio
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from playwright.async_api import async_playwright
 
